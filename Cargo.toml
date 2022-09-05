@@ -1,5 +1,5 @@
 [package]
-name = "performace_tester"
+name = "performance_tester"
 version = "0.1.0"
 edition = "2021"
 
