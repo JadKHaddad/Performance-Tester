@@ -1,5 +1,8 @@
 use rand::Rng;
 use reqwest::Client;
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
@@ -14,57 +17,108 @@ pub enum Method {
     DELETE,
 }
 
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Method::GET => write!(f, "GET"),
+            Method::POST => write!(f, "POST"),
+            Method::PUT => write!(f, "PUT"),
+            Method::DELETE => write!(f, "DELETE"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct EndPoint {
     method: Method,
     url: String,
+    total_requests: Arc<Mutex<u32>>,
 }
 
 impl EndPoint {
     pub fn new(method: Method, url: String) -> EndPoint {
-        EndPoint { method, url }
+        EndPoint {
+            method,
+            url,
+            total_requests: Arc::new(Mutex::new(0)),
+        }
     }
+
     pub fn get_method(&self) -> &Method {
         &self.method
     }
+
     pub fn get_url(&self) -> &String {
         &self.url
     }
 }
+
+impl fmt::Display for EndPoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} | {} | {}",
+            self.method,
+            self.url,
+            self.total_requests.lock().unwrap()
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Test {
     client: Client,
     users: u32,
+    run_time: Option<u64>,
     sleep: u64,
     host: String,
     end_points: Vec<EndPoint>,
-    headers: Option<Vec<String>>,
+    global_headers: Option<HashMap<String, String>>,
+    total_requests: Arc<Mutex<u32>>,
+    total_response_time: Arc<Mutex<u32>>,
 }
 
 impl Test {
     pub fn new(
         users: u32,
+        run_time: Option<u64>,
         sleep: u64,
         host: String,
         end_points: Vec<EndPoint>,
-        headers: Option<Vec<String>>,
+        global_headers: Option<HashMap<String, String>>,
+
     ) -> Self {
         Self {
             client: Client::new(),
             users,
+            run_time,
             sleep,
             host,
             end_points,
-            headers,
+            global_headers,
+            total_requests: Arc::new(Mutex::new(0)),
+            total_response_time: Arc::new(Mutex::new(0)),
         }
     }
 
-    pub async fn run_with_timeout(&self) -> Result<(), Elapsed> {
-        let future = self.run();
-        timeout(Duration::from_secs(10), future).await
+    pub async fn run(&self) -> Result<(), Elapsed> {
+        match self.run_time {
+            Some(run_time) => {
+                return self.run_with_timeout(run_time).await;
+            }
+            None => {
+                self.run_forever().await;
+                return Ok(());
+            }
+        }
     }
 
-    pub async fn run(&self) {
+    pub async fn run_with_timeout(&self, time_out: u64) -> Result<(), Elapsed> {
+        let future = self.run_forever();
+        timeout(Duration::from_secs(time_out), future).await
+    }
+
+    pub async fn run_forever(&self) {
         let mut handles = vec![];
         for i in 0..self.users {
             let user_id = i + 1;
@@ -82,12 +136,12 @@ impl Test {
                         Method::DELETE => test.client.delete(&url),
                     };
 
-                    if let Some(headers) = &test.headers {
-                        for header in headers {
-                            let header = header.split(":").collect::<Vec<&str>>();
-                            request = request.header(header[0], header[1]);
+                    if let Some(global_headers) = &test.global_headers {
+                        for (key, value) in global_headers {
+                            request = request.header(key, value);
                         }
                     }
+                    
                     let start = Instant::now();
                     if let Ok(response) = request.send().await {
                         let duration = start.elapsed();
@@ -99,6 +153,16 @@ impl Test {
                             duration,
                             thread::current().id()
                         );
+
+                        let mut total_response_time = test.total_response_time.lock().unwrap();
+                        *total_response_time += duration.as_millis() as u32;
+                    }
+                    {
+                        let mut total_requests = test.total_requests.lock().unwrap();
+                        *total_requests += 1;
+
+                        let mut end_point_total_requests = end_point.total_requests.lock().unwrap();
+                        *end_point_total_requests += 1;
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(test.select_random_sleep()))
                         .await;
@@ -110,53 +174,6 @@ impl Test {
         for handle in handles {
             handle.await.unwrap();
         }
-    }
-
-    //run with scope, does not support timeout
-    pub async fn run_(&self) {
-        tokio_scoped::scope(|scope| {
-            for i in 0..self.users {
-                let user_id = i + 1;
-                println!("spwaning user: {}", user_id);
-                scope.spawn(async move {
-                    loop {
-                        let end_point = self.select_random_end_point();
-                        let url = format!("{}{}", self.host, end_point.get_url());
-
-                        let mut request = match end_point.get_method() {
-                            Method::GET => self.client.get(&url),
-                            Method::POST => self.client.post(&url),
-                            Method::PUT => self.client.put(&url),
-                            Method::DELETE => self.client.delete(&url),
-                        };
-
-                        if let Some(headers) = &self.headers {
-                            for header in headers {
-                                let header = header.split(":").collect::<Vec<&str>>();
-                                request = request.header(header[0], header[1]);
-                            }
-                        }
-                        let start = Instant::now();
-                        if let Ok(response) = request.send().await {
-                            let duration = start.elapsed();
-                            println!(
-                                "user: {} | {} {} | {:?} | thread id: {:?}",
-                                user_id,
-                                response.status(),
-                                url,
-                                duration,
-                                thread::current().id()
-                            );
-                        }
-                        tokio::time::sleep(std::time::Duration::from_secs(
-                            self.select_random_sleep(),
-                        ))
-                        .await;
-                    }
-                });
-            }
-            println!("all users have been spawned");
-        });
     }
 
     pub fn select_random_end_point(&self) -> &EndPoint {
@@ -175,6 +192,7 @@ impl Test {
 async fn main() {
     let test = Test::new(
         9,
+        Some(5),
         5,
         "https://httpbin.org".to_string(),
         vec![
@@ -185,8 +203,14 @@ async fn main() {
         ],
         None,
     );
-    match test.run_with_timeout().await {
+    match test.run().await {
         Ok(_) => println!("test finished"),
         Err(_) => println!("test timed out"),
+    }
+    let total_requests = test.total_requests.lock().unwrap();
+    println!("total requests: {}", total_requests);
+    println!("total requests per end point:");
+    for end_point in &test.end_points {
+        println!("{}", end_point);
     }
 }
