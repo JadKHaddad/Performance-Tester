@@ -126,21 +126,16 @@ impl Test {
         
         let token = self.token.lock().unwrap().clone();
         
-        let join_handle = tokio::spawn(async move {
-            
-            select! {
-                _ = token.cancelled() => {
-                    // The token was cancelled
-                    println!("canceled");
-                    self
-                }
-                _ = self.select_run_mode_and_run() => {
-                    self
-                }
+        select! {
+            _ = token.cancelled() => {
+                // The token was cancelled
+                println!("canceled");
+                self
             }
-        });
-        //let token = token.lock().unwrap().clone();
-        join_handle.await.unwrap()
+            _ = self.select_run_mode_and_run() => {
+                self
+            }
+        }
     }
 
     pub async fn run_with_timeout(&self, time_out: u64) -> Result<(), Elapsed> {
