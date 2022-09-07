@@ -158,13 +158,13 @@ impl Test {
 
     pub async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
         self.start_timestamp = Some(Instant::now());
-        match self.run_time {
+        return match self.run_time {
             Some(run_time) => {
-                return self.run_with_timeout(run_time).await;
+                self.run_with_timeout(run_time).await
             }
             None => {
                 self.run_forever().await;
-                return Ok(());
+                Ok(())
             }
         }
     }
@@ -193,7 +193,7 @@ impl Test {
         let mut handles = vec![];
         for i in 0..self.users {
             let user_id = i + 1;
-            println!("spwaning user: {}", user_id);
+            println!("spawning user: {}", user_id);
             let test = self.clone();
             let handle = tokio::spawn(async move {
                 loop {
@@ -228,7 +228,7 @@ impl Test {
                         end_point.add_response_time(duration.as_millis() as u32);
                         test.add_response_time(duration.as_millis() as u32);
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(test.select_random_sleep()))
+                    tokio::time::sleep(Duration::from_secs(test.select_random_sleep()))
                         .await;
                 }
             });
@@ -307,8 +307,8 @@ async fn main() {
     let test_handler = test.create_handler();
     tokio::spawn(async move {
         println!("canceling test in 5 seconds");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        println!("attemting cancel");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        println!("attempting cancel");
         test_handler.stop();
     });
 
