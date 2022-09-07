@@ -30,6 +30,26 @@ impl fmt::Display for Method {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub enum Status {
+    CREATED,
+    RUNNING,
+    STOPPED,
+    FINISHED,
+}
+
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Status::CREATED => write!(f, "CREATED"),
+            Status::RUNNING => write!(f, "RUNNING"),
+            Status::STOPPED => write!(f, "STOPPED"),
+            Status::FINISHED => write!(f, "FINISHED"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct EndPointResults {
     total_requests: u32,
@@ -109,9 +129,30 @@ pub struct TestData {
     //TODO
 }
 
+//this struct is used to control the test from another thread
+#[derive(Clone, Debug)]
+pub struct TestHandler {
+    token: Arc<Mutex<CancellationToken>>,
+}
+
+impl TestHandler {
+    pub fn new(token: Arc<Mutex<CancellationToken>>) -> TestHandler {
+        TestHandler {
+            token,
+        }
+    }
+
+    pub fn stop(&self) {
+        self.token.lock().unwrap().cancel();
+    }
+
+    //change the test data
+    //TODO
+}
+
 #[derive(Clone, Debug)]
 pub struct Test {
-    client: Client,
+    status: Status,
     token: Arc<Mutex<CancellationToken>>,
     users: u32,
     run_time: Option<u64>,
@@ -134,7 +175,7 @@ impl Test {
         global_headers: Option<HashMap<String, String>>,
     ) -> Self {
         Self {
-            client: Client::new(),
+            status: Status::CREATED,
             token: Arc::new(Mutex::new(CancellationToken::new())),
             users,
             run_time,
@@ -148,8 +189,8 @@ impl Test {
         }
     }
 
-    pub fn create_handler(&self) -> Self {
-        self.clone()
+    pub fn create_handler(&self) -> TestHandler {
+        TestHandler::new(self.token.clone())
     }
 
     fn add_response_time(&self, response_time: u32) {
@@ -175,36 +216,40 @@ impl Test {
             _ = token.cancelled() => {
                 println!("canceled");
                 self.end_timestamp = Some(Instant::now());
+                self.status = Status::STOPPED;
                 self
             }
             _ = self.select_run_mode_and_run() => {
                 self.end_timestamp = Some(Instant::now());
+                self.status = Status::FINISHED;
                 self
             }
         }
     }
 
-    pub async fn run_with_timeout(&self, time_out: u64) -> Result<(), Elapsed> {
+    pub async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
         let future = self.run_forever();
         timeout(Duration::from_secs(time_out), future).await
     }
 
-    pub async fn run_forever(&self) {
-        let mut handles = vec![];
+    pub async fn run_forever(&mut self) {
+        self.status = Status::RUNNING;
+        let mut join_handles = vec![];
         for i in 0..self.users {
             let user_id = i + 1;
             println!("spawning user: {}", user_id);
             let test = self.clone();
-            let handle = tokio::spawn(async move {
+            let join_handle = tokio::spawn(async move {
+                let client = Client::new();
                 loop {
                     let end_point = test.select_random_end_point();
                     let url = format!("{}{}", test.host, end_point.get_url());
 
                     let mut request = match end_point.get_method() {
-                        Method::GET => test.client.get(&url),
-                        Method::POST => test.client.post(&url),
-                        Method::PUT => test.client.put(&url),
-                        Method::DELETE => test.client.delete(&url),
+                        Method::GET => client.get(&url),
+                        Method::POST => client.post(&url),
+                        Method::PUT => client.put(&url),
+                        Method::DELETE => client.delete(&url),
                     };
 
                     if let Some(global_headers) = &test.global_headers {
@@ -214,7 +259,7 @@ impl Test {
                     }
 
                     let start = Instant::now();
-                    // TODO ConnectionErrors are not handled here yet
+                    //TODO ConnectionErrors are not handled here yet
                     if let Ok(response) = request.send().await {
                         let duration = start.elapsed();
                         println!(
@@ -232,11 +277,11 @@ impl Test {
                         .await;
                 }
             });
-            handles.push(handle);
+            join_handles.push(join_handle);
         }
         println!("all users have been spawned");
-        for handle in handles {
-            match handle.await {
+        for join_handle in join_handles {
+            match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("error: {}", e);
@@ -273,7 +318,8 @@ impl fmt::Display for Test {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | EndPoints [{:?}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
+            "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | EndPoints [{:?}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
+            self.status,
             self.users,
             self.run_time.unwrap_or(0),
             self.sleep,
@@ -292,7 +338,7 @@ impl fmt::Display for Test {
 async fn main() {
     let test = Test::new(
         9,
-        None,
+        Some(10),
         5,
         "https://httpbin.org".to_string(),
         vec![
