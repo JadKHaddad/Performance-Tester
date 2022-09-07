@@ -1,3 +1,4 @@
+use parking_lot::RwLock;
 use rand::Rng;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -6,11 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use tokio::select;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
-//use parking_lot::RwLock;
 use tokio_util::sync::CancellationToken;
-use tokio::select;
 
 #[derive(Clone, Debug)]
 pub enum Method {
@@ -30,12 +30,44 @@ impl fmt::Display for Method {
         }
     }
 }
+#[derive(Clone, Debug)]
+pub struct EndPointResults {
+    total_requests: u32,
+    total_response_time: u32,
+    average_response: u32,
+}
+
+impl EndPointResults {
+    pub fn new() -> EndPointResults {
+        EndPointResults {
+            total_requests: 0,
+            total_response_time: 0,
+            average_response: 0,
+        }
+    }
+
+    pub fn add_response_time(&mut self, response_time: u32) {
+        self.total_response_time += response_time;
+        self.total_requests += 1;
+        self.average_response = self.total_response_time / self.total_requests;
+    }
+}
+
+impl fmt::Display for EndPointResults {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Total Response Time [{}] | Total Requests [{}] | Average Response [{}]",
+            self.total_requests, self.total_response_time, self.average_response
+        )
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct EndPoint {
     method: Method,
     url: String,
-    total_requests: Arc<Mutex<u32>>,
+    results: Arc<RwLock<EndPointResults>>,
 }
 
 impl EndPoint {
@@ -43,7 +75,7 @@ impl EndPoint {
         EndPoint {
             method,
             url,
-            total_requests: Arc::new(Mutex::new(0)),
+            results: Arc::new(RwLock::new(EndPointResults::new())),
         }
     }
 
@@ -54,24 +86,28 @@ impl EndPoint {
     pub fn get_url(&self) -> &String {
         &self.url
     }
+
+    fn add_response_time(&self, response_time: u32) {
+        self.results.write().add_response_time(response_time);
+    }
 }
 
 impl fmt::Display for EndPoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} | {} | {}",
+            "Method [{}] | Url [{}] | Results [{}]",
             self.method,
             self.url,
-            self.total_requests.lock().unwrap()
+            self.results.read()
         )
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct TestData {
-
+    //TODO
 }
-
 
 #[derive(Clone, Debug)]
 pub struct Test {
@@ -83,8 +119,9 @@ pub struct Test {
     host: String,
     end_points: Vec<EndPoint>,
     global_headers: Option<HashMap<String, String>>,
-    total_requests: Arc<Mutex<u32>>,
-    total_response_time: Arc<Mutex<u32>>,
+    results: Arc<RwLock<EndPointResults>>,
+    start_timestamp: Option<Instant>,
+    end_timestamp: Option<Instant>,
 }
 
 impl Test {
@@ -105,12 +142,22 @@ impl Test {
             host,
             end_points,
             global_headers,
-            total_requests: Arc::new(Mutex::new(0)),
-            total_response_time: Arc::new(Mutex::new(0)),
+            results: Arc::new(RwLock::new(EndPointResults::new())),
+            start_timestamp: None,
+            end_timestamp: None,
         }
     }
 
-    pub async fn select_run_mode_and_run(&self) -> Result<(), Elapsed> {
+    pub fn create_handler(&self) -> Self {
+        self.clone()
+    }
+
+    fn add_response_time(&self, response_time: u32) {
+        self.results.write().add_response_time(response_time);
+    }
+
+    pub async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
+        self.start_timestamp = Some(Instant::now());
         match self.run_time {
             Some(run_time) => {
                 return self.run_with_timeout(run_time).await;
@@ -122,17 +169,16 @@ impl Test {
         }
     }
 
-    pub async fn run(self) -> Self {
-        
+    pub async fn run(mut self) -> Self {
         let token = self.token.lock().unwrap().clone();
-        
         select! {
             _ = token.cancelled() => {
-                // The token was cancelled
                 println!("canceled");
+                self.end_timestamp = Some(Instant::now());
                 self
             }
             _ = self.select_run_mode_and_run() => {
+                self.end_timestamp = Some(Instant::now());
                 self
             }
         }
@@ -166,8 +212,9 @@ impl Test {
                             request = request.header(key, value);
                         }
                     }
-                    
+
                     let start = Instant::now();
+                    // TODO ConnectionErrors are not handled here yet
                     if let Ok(response) = request.send().await {
                         let duration = start.elapsed();
                         println!(
@@ -178,16 +225,8 @@ impl Test {
                             duration,
                             thread::current().id()
                         );
-
-                        let mut total_response_time = test.total_response_time.lock().unwrap();
-                        *total_response_time += duration.as_millis() as u32;
-                    }
-                    {
-                        let mut total_requests = test.total_requests.lock().unwrap();
-                        *total_requests += 1;
-
-                        let mut end_point_total_requests = end_point.total_requests.lock().unwrap();
-                        *end_point_total_requests += 1;
+                        end_point.add_response_time(duration.as_millis() as u32);
+                        test.add_response_time(duration.as_millis() as u32);
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(test.select_random_sleep()))
                         .await;
@@ -217,10 +256,35 @@ impl Test {
         rng.gen_range(0..self.sleep)
     }
 
-    pub fn stop(&self){
-
+    pub fn stop(&self) {
         println!("canceling");
         self.token.lock().unwrap().cancel();
+    }
+
+    pub fn get_elapsed_time(&self) -> Option<Duration> {
+        match (self.start_timestamp, self.end_timestamp) {
+            (Some(start), Some(end)) => Some(end.duration_since(start)),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Test {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | EndPoints [{:?}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
+            self.users,
+            self.run_time.unwrap_or(0),
+            self.sleep,
+            self.host,
+            self.end_points,
+            self.global_headers.as_ref().unwrap_or(&HashMap::new()),
+            self.results.read(),
+            self.start_timestamp,
+            self.end_timestamp,
+            self.get_elapsed_time()
+        )
     }
 }
 
@@ -240,21 +304,14 @@ async fn main() {
         None,
     );
 
-    let test_handle = test.clone();
+    let test_handler = test.create_handler();
     tokio::spawn(async move {
         println!("canceling test in 5 seconds");
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         println!("attemting cancel");
-        test_handle.stop();
+        test_handler.stop();
     });
-    
+
     let test = test.run().await;
-    let total_requests = test.total_requests.lock().unwrap();
-    println!("total requests: {}", total_requests);
-    println!("total requests per end point:");
-    for end_point in &test.end_points {
-        println!("{}", end_point);
-    }
-
-
+    println!("{}", test);
 }
