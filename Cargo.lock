@@ -539,10 +539,12 @@ name = "performance_tester"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "parking_lot",
  "rand",
  "reqwest",
  "tokio",
  "tokio-scoped",
+ "tokio-util",
 ]
 
 [[package]]

@@ -8,6 +8,9 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
+//use parking_lot::RwLock;
+use tokio_util::sync::CancellationToken;
+use tokio::select;
 
 #[derive(Clone, Debug)]
 pub enum Method {
@@ -64,10 +67,16 @@ impl fmt::Display for EndPoint {
         )
     }
 }
+#[derive(Clone, Debug)]
+pub struct TestData {
+
+}
+
 
 #[derive(Clone, Debug)]
 pub struct Test {
     client: Client,
+    token: Arc<Mutex<CancellationToken>>,
     users: u32,
     run_time: Option<u64>,
     sleep: u64,
@@ -86,10 +95,10 @@ impl Test {
         host: String,
         end_points: Vec<EndPoint>,
         global_headers: Option<HashMap<String, String>>,
-
     ) -> Self {
         Self {
             client: Client::new(),
+            token: Arc::new(Mutex::new(CancellationToken::new())),
             users,
             run_time,
             sleep,
@@ -101,7 +110,7 @@ impl Test {
         }
     }
 
-    pub async fn run(&self) -> Result<(), Elapsed> {
+    pub async fn select_run_mode_and_run(&self) -> Result<(), Elapsed> {
         match self.run_time {
             Some(run_time) => {
                 return self.run_with_timeout(run_time).await;
@@ -111,6 +120,27 @@ impl Test {
                 return Ok(());
             }
         }
+    }
+
+    pub async fn run(self) -> Self {
+        
+        let token = self.token.lock().unwrap().clone();
+        
+        let join_handle = tokio::spawn(async move {
+            
+            select! {
+                _ = token.cancelled() => {
+                    // The token was cancelled
+                    println!("canceled");
+                    self
+                }
+                _ = self.select_run_mode_and_run() => {
+                    self
+                }
+            }
+        });
+        //let token = token.lock().unwrap().clone();
+        join_handle.await.unwrap()
     }
 
     pub async fn run_with_timeout(&self, time_out: u64) -> Result<(), Elapsed> {
@@ -172,7 +202,12 @@ impl Test {
         }
         println!("all users have been spawned");
         for handle in handles {
-            handle.await.unwrap();
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("error: {}", e);
+                }
+            }
         }
     }
 
@@ -186,13 +221,19 @@ impl Test {
         let mut rng = rand::thread_rng();
         rng.gen_range(0..self.sleep)
     }
+
+    pub fn stop(&self){
+
+        println!("canceling");
+        self.token.lock().unwrap().cancel();
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let test = Test::new(
         9,
-        Some(5),
+        None,
         5,
         "https://httpbin.org".to_string(),
         vec![
@@ -203,14 +244,22 @@ async fn main() {
         ],
         None,
     );
-    match test.run().await {
-        Ok(_) => println!("test finished"),
-        Err(_) => println!("test timed out"),
-    }
+
+    let test_handle = test.clone();
+    tokio::spawn(async move {
+        println!("canceling test in 5 seconds");
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        println!("attemting cancel");
+        test_handle.stop();
+    });
+    
+    let test = test.run().await;
     let total_requests = test.total_requests.lock().unwrap();
     println!("total requests: {}", total_requests);
     println!("total requests per end point:");
     for end_point in &test.end_points {
         println!("{}", end_point);
     }
+
+
 }
