@@ -152,11 +152,6 @@ impl fmt::Display for EndPoint {
 }
 
 #[derive(Clone, Debug)]
-pub struct TestData {
-    //TODO
-}
-
-#[derive(Clone, Debug)]
 pub struct User {
     client: Client,
     token: Arc<Mutex<CancellationToken>>,
@@ -205,10 +200,6 @@ impl User {
             results: Arc::new(RwLock::new(EndPointResults::new())),
             endpoints: Arc::new(RwLock::new(HashMap::new())),
         }
-    }
-
-    pub fn get_endpoints(&self) -> Arc<RwLock<HashMap<String, EndPointResults>>> {
-        self.endpoints.clone()
     }
 
     fn add_headers(&self, mut request: RequestBuilder, endpoint: &EndPoint) -> RequestBuilder {
@@ -295,79 +286,9 @@ impl User {
         self.token.lock().unwrap().cancel();
     }
 
-    pub fn create_handler(&self) -> UserHandler {
-        UserHandler::new(self.token.clone(), self.results.clone())
+    pub fn get_endpoints(&self) -> &Arc<RwLock<HashMap<String, EndPointResults>>> {
+        &self.endpoints
     }
-}
-
-//this struct is used to control a user from another thread
-#[derive(Clone, Debug)]
-pub struct UserHandler {
-    token: Arc<Mutex<CancellationToken>>,
-    results: Arc<RwLock<EndPointResults>>,
-}
-
-impl UserHandler {
-    pub fn new(
-        token: Arc<Mutex<CancellationToken>>,
-        results: Arc<RwLock<EndPointResults>>,
-    ) -> UserHandler {
-        UserHandler { token, results }
-    }
-
-    pub fn stop(&self) {
-        self.token.lock().unwrap().cancel();
-    }
-
-    //change the user data
-    //TODO
-}
-
-//this struct is used to control a test from another thread
-#[derive(Clone, Debug)]
-pub struct TestHandler {
-    token: Arc<Mutex<CancellationToken>>,
-    results: Arc<RwLock<EndPointResults>>,
-    users: Arc<RwLock<Vec<User>>>,
-    pub status: Arc<RwLock<Status>>,
-    start_timestamp: Arc<RwLock<Option<Instant>>>,
-    end_timestamp: Arc<RwLock<Option<Instant>>>,
-    endpoints: Arc<Vec<EndPoint>>,
-}
-
-impl TestHandler {
-    pub fn new(
-        token: Arc<Mutex<CancellationToken>>,
-        results: Arc<RwLock<EndPointResults>>,
-        users: Arc<RwLock<Vec<User>>>,
-        status: Arc<RwLock<Status>>,
-        start_timestamp: Arc<RwLock<Option<Instant>>>,
-        end_timestamp: Arc<RwLock<Option<Instant>>>,
-        endpoints: Arc<Vec<EndPoint>>,
-    ) -> TestHandler {
-        TestHandler {
-            token,
-            results,
-            users,
-            status,
-            start_timestamp,
-            end_timestamp,
-            endpoints,
-        }
-    }
-
-    pub fn stop(&self) {
-        self.token.lock().unwrap().cancel();
-    }
-
-    pub fn stop_a_user(&mut self, user_id: usize) {
-        if let Some(user) = self.users.read().get(user_id) {
-            user.stop();
-        }
-    }
-
-    //change the test data
-    //TODO
 }
 
 trait Updatble {
@@ -447,50 +368,6 @@ impl Updatble for User {
     }
 }
 
-impl Updatble for TestHandler {
-    fn add_response_time(&self, response_time: u32) {
-        self.results.write().add_response_time(response_time);
-    }
-
-    fn set_requests_per_second(&self, requests_per_second: f64) {
-        self.results
-            .write()
-            .set_requests_per_second(requests_per_second);
-    }
-
-    fn calculate_requests_per_second(&self, elapsed: &Duration) {
-        self.results.write().calculate_requests_per_second(elapsed);
-        for user in self.users.read().iter() {
-            user.calculate_requests_per_second(elapsed);
-        }
-        for endpoint in self.endpoints.iter() {
-            endpoint.calculate_requests_per_second(elapsed);
-        }
-    }
-
-    fn get_results(&self) -> Arc<RwLock<EndPointResults>> {
-        self.results.clone()
-    }
-}
-
-impl Updatble for UserHandler {
-    fn add_response_time(&self, response_time: u32) {
-        self.results.write().add_response_time(response_time);
-    }
-
-    fn set_requests_per_second(&self, requests_per_second: f64) {
-        self.results
-            .write()
-            .set_requests_per_second(requests_per_second);
-    }
-
-    fn calculate_requests_per_second(&self, _elapsed: &Duration) {}
-
-    fn get_results(&self) -> Arc<RwLock<EndPointResults>> {
-        self.results.clone()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Test {
     status: Arc<RwLock<Status>>,
@@ -545,28 +422,8 @@ impl Test {
         user
     }
 
-    pub fn get_users(&self) -> Arc<RwLock<Vec<User>>> {
-        self.users.clone()
-    }
-
-    pub fn get_endpoints(&self) -> Arc<Vec<EndPoint>> {
-        self.endpoints.clone()
-    }
-
-    pub fn create_handler(&self) -> TestHandler {
-        TestHandler::new(
-            self.token.clone(),
-            self.results.clone(),
-            self.users.clone(),
-            self.status.clone(),
-            self.start_timestamp.clone(),
-            self.end_timestamp.clone(),
-            self.endpoints.clone(),
-        )
-    }
-
-    pub async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
-        *self.start_timestamp.write() = Some(Instant::now()); //TODO use a method just like the line after this one
+    async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
+        self.set_start_timestamp(Instant::now());
         self.set_status(Status::RUNNING);
         self.update_in_background(2);
         return match self.run_time {
@@ -582,16 +439,24 @@ impl Test {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                *self.end_timestamp.write() = Some(Instant::now());
+                self.set_end_timestamp(Instant::now());
                 self.set_status(Status::STOPPED);
                 self.set_users_status(Status::STOPPED);
             }
             _ = self.select_run_mode_and_run() => {
-                *self.end_timestamp.write() = Some(Instant::now());
+                self.set_end_timestamp(Instant::now());
                 self.set_status(Status::FINISHED);
                 self.set_users_status(Status::FINISHED);
             }
         }
+    }
+
+    fn set_start_timestamp(&self, start_timestamp: Instant) {
+        *self.start_timestamp.write() = Some(start_timestamp);
+    }
+
+    fn set_end_timestamp(&self, end_timestamp: Instant) {
+        *self.end_timestamp.write() = Some(end_timestamp);
     }
 
     fn set_status(&self, status: Status) {
@@ -605,7 +470,7 @@ impl Test {
     }
 
     fn update_in_background(&self, thread_sleep_time: u64) {
-        let test_handler = self.create_handler();
+        let test_handler = self.clone();
         tokio::spawn(async move {
             loop {
                 if let Some(elapsed) = Test::calculate_elapsed_time(
@@ -619,12 +484,12 @@ impl Test {
         });
     }
 
-    pub async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
+    async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
         let future = self.run_forever();
         timeout(Duration::from_secs(time_out), future).await
     }
 
-    pub async fn run_forever(&mut self) {
+    async fn run_forever(&mut self) {
         let mut join_handles = vec![];
         for i in 0..self.user_count {
             let user_id = i;
@@ -646,13 +511,13 @@ impl Test {
         }
     }
 
-    pub fn select_random_endpoint(endpoints: &Arc<Vec<EndPoint>>) -> &EndPoint {
+    fn select_random_endpoint(endpoints: &Arc<Vec<EndPoint>>) -> &EndPoint {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..endpoints.len());
         &endpoints[index]
     }
 
-    pub fn select_random_sleep(sleep: u64) -> u64 {
+    fn select_random_sleep(sleep: u64) -> u64 {
         let mut rng = rand::thread_rng();
         rng.gen_range(0..sleep)
     }
@@ -661,9 +526,13 @@ impl Test {
         self.token.lock().unwrap().cancel();
     }
 
-    pub fn stop_a_user(&mut self, user_id: usize) {
-        if let Some(user) = self.users.read().get(user_id) {
-            user.stop();
+    pub fn stop_a_user(&mut self, user_id: usize) -> Result<(), String> {
+        match self.users.read().get(user_id) {
+            Some(user) => {
+                user.stop();
+                Ok(())
+            }
+            None => Err(String::from("user not found")),
         }
     }
 
@@ -684,6 +553,14 @@ impl Test {
             (Some(start), None) => Some(Instant::now().duration_since(start)),
             _ => None,
         }
+    }
+
+    pub fn get_users(&self) -> &Arc<RwLock<Vec<User>>> {
+        &self.users
+    }
+
+    pub fn get_endpoints(&self) -> &Arc<Vec<EndPoint>> {
+        &self.endpoints
     }
 }
 
@@ -710,7 +587,7 @@ impl fmt::Display for Test {
 async fn main() {
     let mut test = Test::new(
         10,
-        Some(20),
+        Some(10),
         5,
         "https://google.com".to_string(),
         vec![
@@ -724,7 +601,7 @@ async fn main() {
     );
     println!("test created {}", test);
 
-    let test_handler = test.create_handler();
+    let test_handler = test.clone();
     tokio::spawn(async move {
         println!("canceling test in 200 seconds");
         tokio::time::sleep(Duration::from_secs(30)).await;
@@ -732,23 +609,23 @@ async fn main() {
         test_handler.stop();
     });
 
-    let mut test_handler = test.create_handler();
+    let mut test_handler = test.clone();
     tokio::spawn(async move {
         println!("canceling user 1 in 5 seconds");
         tokio::time::sleep(Duration::from_secs(5)).await;
         println!("attempting cancel user 1");
-        test_handler.stop_a_user(1);
+        test_handler.stop_a_user(1).unwrap_or_default();
     });
 
-    let mut test_handler = test.create_handler();
+    let mut test_handler = test.clone();
     tokio::spawn(async move {
         println!("canceling user 15 in 7 seconds");
         tokio::time::sleep(Duration::from_secs(7)).await;
         println!("attempting cancel user 15");
-        test_handler.stop_a_user(15);
+        test_handler.stop_a_user(15).unwrap_or_default();
     });
 
-    let test_handler = test.create_handler();
+    let test_handler = test.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(3)).await;
