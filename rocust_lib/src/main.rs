@@ -12,9 +12,6 @@ use tokio::select;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use tokio::sync::broadcast;
-use tokio::sync::broadcast::Sender;
-use tokio::sync::broadcast::Receiver;
 
 #[derive(Clone, Debug)]
 pub enum UserBehaviour {
@@ -233,16 +230,14 @@ impl User {
         self.add_response_time(response_time);
     }
 
-    pub async fn run(mut self, rx: Receiver<Status>) -> Self {
+    pub async fn run(&mut self){
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
                 self.set_status(Status::STOPPED);
-                self
             }
-            _ = self.run_forever(rx) => {
+            _ = self.run_forever() => {
                 self.set_status(Status::FINISHED);
-                self
             }
         }
     }
@@ -251,39 +246,9 @@ impl User {
         *self.status.write() = status;
     }
 
-    async fn run_forever(&mut self, mut rx: Receiver<Status>) {
+    async fn run_forever(&mut self) {
         self.set_status(Status::RUNNING);
-        let user_handler = self.create_handler();
-        tokio::spawn(async move {
-            if let Ok(test_status) = rx.recv().await{
-                let mut old_status = user_handler.status.write();
-                match test_status {
-                    Status::STOPPED => {
-                        match *old_status {
-                            Status::RUNNING => {
-                                *old_status = Status::STOPPED;
-                            },
-                            _ => {
-                                
-                            }
-                        }
-                    },
-                    Status::FINISHED => {
-                        match *old_status {
-                            Status::RUNNING => {
-                                *old_status = Status::FINISHED;
-                            },
-                            _ => {
-                                
-                            }
-                        }
-                    },
-                    _ => {
-
-                    }
-                }
-            }
-        });
+        
         loop {
             let endpoint = Test::select_random_endpoint(&self.global_endpoints);
             let url = format!("{}{}", self.host, endpoint.get_url());
@@ -317,7 +282,7 @@ impl User {
     }
 
     pub fn create_handler(&self) -> UserHandler {
-        UserHandler::new(self.token.clone(), self.results.clone(), self.status.clone())
+        UserHandler::new(self.token.clone(), self.results.clone())
     }
 
 }
@@ -327,16 +292,14 @@ impl User {
 pub struct UserHandler {
     token: Arc<Mutex<CancellationToken>>,
     results: Arc<RwLock<EndPointResults>>,
-    status: Arc<RwLock<Status>>,
 }
 
 impl UserHandler {
     pub fn new(
         token: Arc<Mutex<CancellationToken>>,
         results: Arc<RwLock<EndPointResults>>,
-        status: Arc<RwLock<Status>>,
     ) -> UserHandler {
-        UserHandler { token, results, status }
+        UserHandler { token, results }
     }
 
     pub fn stop(&self) {
@@ -353,6 +316,7 @@ pub struct TestHandler {
     token: Arc<Mutex<CancellationToken>>,
     results: Arc<RwLock<EndPointResults>>,
     users: Arc<RwLock<Vec<User>>>,
+    pub status: Arc<RwLock<Status>>,
 }
 
 impl TestHandler {
@@ -360,8 +324,9 @@ impl TestHandler {
         token: Arc<Mutex<CancellationToken>>,
         results: Arc<RwLock<EndPointResults>>,
         users: Arc<RwLock<Vec<User>>>,
+        status: Arc<RwLock<Status>>,
     ) -> TestHandler {
-        TestHandler { token, results, users }
+        TestHandler { token, results, users, status }
     }
 
     pub fn stop(&self) {
@@ -373,6 +338,8 @@ impl TestHandler {
             user.stop();
         }
     }
+
+
 
     //change the test data
     //TODO
@@ -493,7 +460,7 @@ impl Updatble for UserHandler {
 
 #[derive(Clone, Debug)]
 pub struct Test {
-    status: Status,
+    status: Arc<RwLock<Status>>,
     token: Arc<Mutex<CancellationToken>>,
     user_count: u32,
     run_time: Option<u64>,
@@ -505,7 +472,6 @@ pub struct Test {
     start_timestamp: Option<Instant>,
     end_timestamp: Option<Instant>,
     users: Arc<RwLock<Vec<User>>>,
-    tx: Sender<Status>
 }
 
 impl Test {
@@ -518,7 +484,7 @@ impl Test {
         global_headers: Option<HashMap<String, String>>,
     ) -> Self {
         Self {
-            status: Status::CREATED,
+            status: Arc::new(RwLock::new(Status::CREATED)),
             token: Arc::new(Mutex::new(CancellationToken::new())),
             user_count,
             run_time,
@@ -530,7 +496,6 @@ impl Test {
             start_timestamp: None,
             end_timestamp: None,
             users: Arc::new(RwLock::new(Vec::new())),
-            tx: broadcast::channel::<Status>(16).0
         }
     }
 
@@ -556,7 +521,7 @@ impl Test {
     }
 
     pub fn create_handler(&self) -> TestHandler {
-        TestHandler::new(self.token.clone(), self.results.clone(), self.users.clone())
+        TestHandler::new(self.token.clone(), self.results.clone(), self.users.clone(), self.status.clone())
     }
 
     pub async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
@@ -570,26 +535,22 @@ impl Test {
         };
     }
 
-    pub async fn run(mut self) -> Self {
+    pub async fn run(&mut self) {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
                 self.end_timestamp = Some(Instant::now());
                 self.set_status(Status::STOPPED);
-                self.tx.send(self.status.clone()).unwrap_or_default();
-                self
             }
             _ = self.select_run_mode_and_run() => {
                 self.end_timestamp = Some(Instant::now());
                 self.set_status(Status::FINISHED);
-                self.tx.send(self.status.clone()).unwrap_or_default();
-                self
             }
         }
     }
 
-    fn set_status(&mut self, status: Status){
-        self.status = status;
+    fn set_status(&self, status: Status) {
+        *self.status.write() = status;
     }
 
     pub async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
@@ -603,10 +564,9 @@ impl Test {
         for i in 0..self.user_count {
             let user_id = i;
             println!("spawning user: {}", user_id);
-            let user = self.create_user(user_id.to_string());
-            let rx = self.tx.subscribe();
+            let mut user = self.create_user(user_id.to_string());
             let join_handle = tokio::spawn(async move {
-                user.run(rx).await;
+                user.run().await;
             });
             join_handles.push(join_handle);
         }
@@ -655,7 +615,7 @@ impl fmt::Display for Test {
         write!(
             f,
             "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
-            self.status,
+            self.status.read(),
             self.user_count,
             self.run_time.unwrap_or(0),
             self.sleep,
@@ -671,9 +631,9 @@ impl fmt::Display for Test {
 
 #[tokio::main]
 async fn main() {
-    let test = Test::new(
+    let mut test = Test::new(
         2,
-        Some(10),
+        Some(50),
         5,
         "https://google.com".to_string(),
         vec![
@@ -685,11 +645,12 @@ async fn main() {
         ],
         None,
     );
+    println!("test created {}", test);
 
     let test_handler = test.create_handler();
     tokio::spawn(async move {
         println!("canceling test in 50 seconds");
-        tokio::time::sleep(Duration::from_secs(50)).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
         println!("attempting cancel");
         test_handler.stop();
     });
@@ -702,7 +663,15 @@ async fn main() {
         test_handler.stop_a_user(1);
     });
 
-    let test = test.run().await;
+    let test_handler = test.create_handler();
+    tokio::spawn(async move {
+        loop{
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            println!("STATUS: [{}]", test_handler.status.read());
+        }
+    });
+
+    test.run().await;
     println!("{}", test);
 
     let endpoints = test.get_endpoints();
