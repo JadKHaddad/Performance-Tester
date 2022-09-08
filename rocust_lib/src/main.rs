@@ -63,6 +63,7 @@ pub struct EndPointResults {
     total_requests: u32,
     total_response_time: u32,
     average_response: u32,
+    requests_per_second: f64,
 }
 
 impl EndPointResults {
@@ -71,6 +72,7 @@ impl EndPointResults {
             total_requests: 0,
             total_response_time: 0,
             average_response: 0,
+            requests_per_second: 0.0,
         }
     }
 
@@ -79,14 +81,28 @@ impl EndPointResults {
         self.total_requests += 1;
         self.average_response = self.total_response_time / self.total_requests;
     }
+
+    fn get_total_requests(&self) -> u32 {
+        self.total_requests
+    }
+
+    fn set_requests_per_second(&mut self, requests_per_second: f64) {
+        self.requests_per_second = requests_per_second;
+    }
+
+    fn calculate_requests_per_second(&mut self, elapsed: &Duration) {
+        let total_requests = self.get_total_requests();
+        let requests_per_second = total_requests as f64 / elapsed.as_secs_f64();
+        self.set_requests_per_second(requests_per_second);
+    }
 }
 
 impl fmt::Display for EndPointResults {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Total Requests [{}] | Total Response Time [{}] | Average Response [{}]",
-            self.total_requests, self.total_response_time, self.average_response
+            "Total Requests [{}] | Requests per Second [{}] | Total Response Time [{}] | Average Response Time [{}]",
+            self.total_requests, self.requests_per_second, self.total_response_time, self.average_response
         )
     }
 }
@@ -120,6 +136,7 @@ impl EndPoint {
     fn add_response_time(&self, response_time: u32) {
         self.results.write().add_response_time(response_time);
     }
+
 }
 
 impl fmt::Display for EndPoint {
@@ -156,8 +173,8 @@ impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "User [{}] | Results [{}] | Endpoints [{:?}]",
-            self.id, self.results.read(), self.endpoints.read()
+            "User [{}] | Results [{}]",
+            self.id, self.results.read()
         )
     }
 }
@@ -182,6 +199,10 @@ impl User {
             results: Arc::new(RwLock::new(EndPointResults::new())),
             endpoints: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    pub fn get_endpoints(&self) ->  Arc<RwLock<HashMap<String, EndPointResults>>> {
+        self.endpoints.clone()
     }
 
     fn add_headers(&self, mut request: RequestBuilder, endpoint: &EndPoint) -> RequestBuilder {
@@ -262,11 +283,42 @@ impl TestHandler {
 
 trait Updatble {
     fn add_response_time(&self, response_time: u32);
+    fn set_requests_per_second(&self, requests_per_second: f64);
+    fn calculate_requests_per_second(&self, elapsed: &Duration);
 }
 
 impl Updatble for Test {
     fn add_response_time(&self, response_time: u32) {
         self.results.write().add_response_time(response_time);
+    }
+
+    fn set_requests_per_second(&self, requests_per_second: f64) {
+        self.results.write().set_requests_per_second(requests_per_second);
+    }
+
+    fn calculate_requests_per_second(&self, elapsed: &Duration){
+        self.results.write().calculate_requests_per_second(elapsed);
+        for user in self.users.read().iter() {
+            user.calculate_requests_per_second(elapsed);
+        }
+        for endpoint in self.endpoints.iter() {
+            endpoint.calculate_requests_per_second(elapsed);
+        }
+    }
+}
+
+
+impl Updatble for EndPoint {
+    fn add_response_time(&self, response_time: u32) {
+        self.results.write().add_response_time(response_time);
+    }
+
+    fn set_requests_per_second(&self, requests_per_second: f64) {
+        self.results.write().set_requests_per_second(requests_per_second);
+    }
+
+    fn calculate_requests_per_second(&self, elapsed: &Duration) {
+        self.results.write().calculate_requests_per_second(elapsed);
     }
 }
 
@@ -275,11 +327,30 @@ impl Updatble for User {
         self.global_results.write().add_response_time(response_time);
         self.results.write().add_response_time(response_time);
     }
+
+    fn set_requests_per_second(&self, requests_per_second: f64) {
+        self.results.write().set_requests_per_second(requests_per_second);
+    }
+
+    fn calculate_requests_per_second(&self, elapsed: &Duration) {
+        self.results.write().calculate_requests_per_second(elapsed);
+        for (_, endpoint_result) in self.endpoints.write().iter_mut() {
+            endpoint_result.calculate_requests_per_second(elapsed);
+        }
+    }
 }
 
 impl Updatble for TestHandler {
     fn add_response_time(&self, response_time: u32) {
         self.results.write().add_response_time(response_time);
+    }
+
+    fn set_requests_per_second(&self, requests_per_second: f64) {
+        self.results.write().set_requests_per_second(requests_per_second);
+    }
+
+    fn calculate_requests_per_second(&self, _elapsed: &Duration) {
+        
     }
 }
 
@@ -339,6 +410,10 @@ impl Test {
 
     pub fn get_users(&self) -> Arc<RwLock<Vec<User>>> {
         self.users.clone()
+    }
+
+    pub fn get_endpoints(&self) -> Arc<Vec<EndPoint>> {
+        self.endpoints.clone()
     }
 
     pub fn create_handler(&self) -> TestHandler {
@@ -430,13 +505,12 @@ impl fmt::Display for Test {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | EndPoints [{:?}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
+            "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
             self.status,
             self.user_count,
             self.run_time.unwrap_or(0),
             self.sleep,
             self.host,
-            self.endpoints,
             self.global_headers.as_ref().unwrap_or(&HashMap::new()),
             self.results.read(),
             self.start_timestamp,
@@ -473,9 +547,20 @@ async fn main() {
     let test = test.run().await;
     println!("{}", test);
 
+    let endpoints = test.get_endpoints();
+    for endpoint in endpoints.iter() {
+        println!("{}", endpoint);
+        println!("------------------------------");
+    }
     let users = test.get_users();
     for user in users.read().iter() {
-        println!("{}", user);
-        println!("--------");
+        println!("{}\n", user);
+        for (endpoint_url, results) in user.get_endpoints().read().iter() {
+            println!("\t[{}] | [{}]\n", endpoint_url, results);
+        }
+        println!("------------------------------");
     }
+
+
+
 }
