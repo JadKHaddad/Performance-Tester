@@ -14,7 +14,8 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
-pub enum UserBehaviour { //TODO
+pub enum UserBehaviour {
+    //TODO
     AGGRESSIVE,
     PASSIVE,
     LAZY,
@@ -136,7 +137,6 @@ impl EndPoint {
     fn add_response_time(&self, response_time: u32) {
         self.results.write().add_response_time(response_time);
     }
-
 }
 
 impl fmt::Display for EndPoint {
@@ -171,11 +171,7 @@ pub struct User {
 
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "User [{}] | Results [{}]",
-            self.id, self.results.read()
-        )
+        write!(f, "User [{}] | Results [{}]", self.id, self.results.read())
     }
 }
 
@@ -201,7 +197,7 @@ impl User {
         }
     }
 
-    pub fn get_endpoints(&self) ->  Arc<RwLock<HashMap<String, EndPointResults>>> {
+    pub fn get_endpoints(&self) -> Arc<RwLock<HashMap<String, EndPointResults>>> {
         self.endpoints.clone()
     }
 
@@ -221,7 +217,8 @@ impl User {
 
     fn add_endpoint_response_time(&self, response_time: u32, endpoint: &EndPoint) {
         endpoint.add_response_time(response_time);
-        self.endpoints.write()
+        self.endpoints
+            .write()
             .entry(endpoint.url.clone())
             .or_insert(EndPointResults::new())
             .add_response_time(response_time);
@@ -293,10 +290,12 @@ impl Updatble for Test {
     }
 
     fn set_requests_per_second(&self, requests_per_second: f64) {
-        self.results.write().set_requests_per_second(requests_per_second);
+        self.results
+            .write()
+            .set_requests_per_second(requests_per_second);
     }
 
-    fn calculate_requests_per_second(&self, elapsed: &Duration){
+    fn calculate_requests_per_second(&self, elapsed: &Duration) {
         self.results.write().calculate_requests_per_second(elapsed);
         for user in self.users.read().iter() {
             user.calculate_requests_per_second(elapsed);
@@ -307,14 +306,15 @@ impl Updatble for Test {
     }
 }
 
-
 impl Updatble for EndPoint {
     fn add_response_time(&self, response_time: u32) {
         self.results.write().add_response_time(response_time);
     }
 
     fn set_requests_per_second(&self, requests_per_second: f64) {
-        self.results.write().set_requests_per_second(requests_per_second);
+        self.results
+            .write()
+            .set_requests_per_second(requests_per_second);
     }
 
     fn calculate_requests_per_second(&self, elapsed: &Duration) {
@@ -329,7 +329,9 @@ impl Updatble for User {
     }
 
     fn set_requests_per_second(&self, requests_per_second: f64) {
-        self.results.write().set_requests_per_second(requests_per_second);
+        self.results
+            .write()
+            .set_requests_per_second(requests_per_second);
     }
 
     fn calculate_requests_per_second(&self, elapsed: &Duration) {
@@ -346,12 +348,12 @@ impl Updatble for TestHandler {
     }
 
     fn set_requests_per_second(&self, requests_per_second: f64) {
-        self.results.write().set_requests_per_second(requests_per_second);
+        self.results
+            .write()
+            .set_requests_per_second(requests_per_second);
     }
 
-    fn calculate_requests_per_second(&self, _elapsed: &Duration) {
-        
-    }
+    fn calculate_requests_per_second(&self, _elapsed: &Duration) {}
 }
 
 #[derive(Clone, Debug)]
@@ -560,7 +562,4 @@ async fn main() {
         }
         println!("------------------------------");
     }
-
-
-
 }
