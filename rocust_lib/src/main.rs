@@ -566,7 +566,9 @@ impl Test {
     }
 
     pub async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
-        *self.start_timestamp.write() = Some(Instant::now());
+        *self.start_timestamp.write() = Some(Instant::now()); //TODO use a method just like the line after this one
+        self.set_status(Status::RUNNING);
+        self.update_in_background(2);
         return match self.run_time {
             Some(run_time) => self.run_with_timeout(run_time).await,
             None => {
@@ -623,8 +625,6 @@ impl Test {
     }
 
     pub async fn run_forever(&mut self) {
-        self.set_status(Status::RUNNING);
-        self.update_in_background(2);
         let mut join_handles = vec![];
         for i in 0..self.user_count {
             let user_id = i;
