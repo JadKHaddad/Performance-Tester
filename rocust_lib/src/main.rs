@@ -14,6 +14,13 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
+pub enum UserBehaviour { //TODO
+    AGGRESSIVE,
+    PASSIVE,
+    LAZY,
+}
+
+#[derive(Clone, Debug)]
 pub enum Method {
     GET,
     POST,
