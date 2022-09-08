@@ -149,7 +149,7 @@ pub struct User {
     global_headers: Option<HashMap<String, String>>,
     global_results: Arc<RwLock<EndPointResults>>,
     results: Arc<RwLock<EndPointResults>>,
-    endpoints: Arc<Vec<EndPoint>>, //TODO  make this a hashmap with the endpoint name as the key and the endpoint result as the value
+    endpoints: Arc<RwLock<HashMap<String, EndPointResults>>>,
 }
 
 impl fmt::Display for User {
@@ -157,7 +157,7 @@ impl fmt::Display for User {
         write!(
             f,
             "User [{}] | Results [{}] | Endpoints [{:?}]",
-            self.id, self.results.read(), self.endpoints
+            self.id, self.results.read(), self.endpoints.read()
         )
     }
 }
@@ -180,7 +180,7 @@ impl User {
             global_headers,
             global_results,
             results: Arc::new(RwLock::new(EndPointResults::new())),
-            endpoints: Arc::new(Vec::new()),
+            endpoints: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -196,6 +196,15 @@ impl User {
             }
         }
         request
+    }
+
+    fn add_endpoint_response_time(&self, response_time: u32, endpoint: &EndPoint) {
+        endpoint.add_response_time(response_time);
+        self.endpoints.write()
+            .entry(endpoint.url.clone())
+            .or_insert(EndPointResults::new())
+            .add_response_time(response_time);
+        self.add_response_time(response_time);
     }
 
     async fn perform(&self) {
@@ -221,9 +230,7 @@ impl User {
                     duration,
                     thread::current().id()
                 );
-                endpoint.add_response_time(duration.as_millis() as u32);
-                self.
-                    add_response_time(duration.as_millis() as u32);
+                self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
             }
             tokio::time::sleep(Duration::from_secs(Test::select_random_sleep(self.sleep))).await;
         }
@@ -280,7 +287,7 @@ impl Updatble for TestHandler {
 pub struct Test {
     status: Status,
     token: Arc<Mutex<CancellationToken>>,
-    users: u32,
+    user_count: u32,
     run_time: Option<u64>,
     sleep: u64,
     host: Arc<String>,
@@ -289,11 +296,12 @@ pub struct Test {
     results: Arc<RwLock<EndPointResults>>,
     start_timestamp: Option<Instant>,
     end_timestamp: Option<Instant>,
+    users: Arc<RwLock<Vec<User>>>,
 }
 
 impl Test {
     pub fn new(
-        users: u32,
+        user_count: u32,
         run_time: Option<u64>,
         sleep: u64,
         host: String,
@@ -303,7 +311,7 @@ impl Test {
         Self {
             status: Status::CREATED,
             token: Arc::new(Mutex::new(CancellationToken::new())),
-            users,
+            user_count,
             run_time,
             sleep,
             host: Arc::new(host),
@@ -312,18 +320,25 @@ impl Test {
             results: Arc::new(RwLock::new(EndPointResults::new())),
             start_timestamp: None,
             end_timestamp: None,
+            users: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
-    pub fn creat_user(&self, id: String) -> User {
-        User::new(
+    pub fn create_user(&self, id: String) -> User {
+        let user = User::new(
             id,
             self.sleep,
             self.host.clone(),
             self.endpoints.clone(),
             self.global_headers.clone(),
             self.results.clone(),
-        )
+        );
+        self.users.write().push(user.clone());
+        user
+    }
+
+    pub fn get_users(&self) -> Arc<RwLock<Vec<User>>> {
+        self.users.clone()
     }
 
     pub fn create_handler(&self) -> TestHandler {
@@ -366,10 +381,10 @@ impl Test {
     pub async fn run_forever(&mut self) {
         self.status = Status::RUNNING;
         let mut join_handles = vec![];
-        for i in 0..self.users {
+        for i in 0..self.user_count {
             let user_id = i + 1;
             println!("spawning user: {}", user_id);
-            let user = self.creat_user(user_id.to_string());
+            let user = self.create_user(user_id.to_string());
 
             let join_handle = tokio::spawn(async move {
                 user.perform().await;
@@ -417,7 +432,7 @@ impl fmt::Display for Test {
             f,
             "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{}] | Host [{}] | EndPoints [{:?}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
             self.status,
-            self.users,
+            self.user_count,
             self.run_time.unwrap_or(0),
             self.sleep,
             self.host,
@@ -457,4 +472,10 @@ async fn main() {
 
     let test = test.run().await;
     println!("{}", test);
+
+    let users = test.get_users();
+    for user in users.read().iter() {
+        println!("{}", user);
+        println!("--------");
+    }
 }
