@@ -233,7 +233,7 @@ impl User {
                 self.set_status(Status::STOPPED);
             }
             _ = self.run_forever() => {
-                self.set_status(Status::FINISHED);
+                //self.set_status(Status::FINISHED);
             }
         }
     }
@@ -244,10 +244,13 @@ impl User {
 
     fn set_status_with_check(&self, status: Status) {
         let current_status = self.status.read().clone();
-        match current_status {
-            Status::RUNNING => {
+        match (current_status, &status) {
+            (Status::RUNNING, _ ) => {
                 *self.status.write() = status;
-            }
+            },
+            (Status::STOPPED, Status::FINISHED) => {
+                *self.status.write() = status;
+            },
             _ => {}
         }
     }
@@ -442,13 +445,11 @@ impl Test {
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::STOPPED);
                 self.stop_users();
-                self.set_users_status(Status::STOPPED);
             }
             _ = self.select_run_mode_and_run() => {
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::FINISHED);
-                self.stop_users();
-                self.set_users_status(Status::FINISHED);
+                self.finish_users();
             }
         }
     }
@@ -465,11 +466,7 @@ impl Test {
         *self.status.write() = status;
     }
 
-    fn set_users_status(&self, status: Status) {
-        for user in self.users.write().iter_mut() {
-            user.set_status_with_check(status.clone());
-        }
-    }
+
 
     fn update_in_background(&self, thread_sleep_time: u64) {
         let test_handler = self.clone();
@@ -541,6 +538,14 @@ impl Test {
     pub fn stop_users(&self) {
         for user in self.users.read().iter() {
             user.stop();
+            user.set_status_with_check(Status::STOPPED);
+        }
+    }
+
+    pub fn finish_users(&self) {
+        for user in self.users.read().iter() {
+            user.stop();
+            user.set_status_with_check(Status::FINISHED);
         }
     }
 

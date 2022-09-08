@@ -1,31 +1,20 @@
-use rocust_lib::{EndPoint, Method, Test};
+use parking_lot::RwLock;
 use poem::{
-    get, handler, listener::TcpListener, middleware::AddData, web::Data, EndpointExt, Route, Server,
+    get, handler,
+    listener::TcpListener,
+    middleware::AddData,
+    web::{Data, Path},
+    EndpointExt, Route, Server,
 };
+use rocust_lib::{EndPoint, Method, Status, Test};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[handler]
-fn start_test(test: Data<&Test>) -> String {
-    let mut test = test.clone();
-    tokio::spawn(async move {
-        test.run().await;
-    });
-    format!("Ok")
-}
+fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
+    let mut tests = tests.write();
 
-#[handler]
-fn stop_test(test: Data<&Test>) -> String {
-    test.stop();
-    format!("Ok")
-}
-
-#[handler]
-fn index() -> String {
-    format!("Ok")
-}
-
-#[tokio::main]
-async fn main() -> Result<(), std::io::Error> {
-    let test = Test::new(
+    let new_test = Test::new(
         10,
         Some(10),
         5,
@@ -40,13 +29,58 @@ async fn main() -> Result<(), std::io::Error> {
         None,
     );
 
+    tests.insert(id.clone(), new_test);
+
+    format!("Ok")
+}
+
+#[handler]
+fn start_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
+    let tests = tests.read();
+    if let Some(test) = tests.get(&id) {
+        let mut test = test.clone();
+        tokio::spawn(async move {
+            test.run().await;
+        });
+        format!("Ok")
+    } else {
+        format!("NotFound")
+    }
+}
+
+#[handler]
+fn stop_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
+    let tests = tests.read();
+    if let Some(test) = tests.get(&id) {
+        test.stop();
+        format!("Ok")
+    } else {
+        format!("NotFound")
+    }
+}
+
+#[handler]
+fn index(tests: Data<&TestCollection>) -> String {
+    let tests = tests.read();
+    let tests: Vec<(String, Status)> = tests
+        .clone()
+        .into_iter()
+        .map(|(id, test)| (id, test.get_status().read().clone()))
+        .collect();
+    format!("{:?}", tests)
+}
+
+type TestCollection = Arc<RwLock<HashMap<String, Test>>>;
+#[tokio::main]
+async fn main() -> Result<(), std::io::Error> {
+    let tests: TestCollection = Arc::new(RwLock::new(HashMap::new()));
     let app = Route::new()
         .at("/", get(index))
-        .at("/start", get(start_test))
-        .at("/stop", get(stop_test))
-        .with(AddData::new(test));
+        .at("/add/:id", get(add_test))
+        .at("/start/:id", get(start_test))
+        .at("/stop/:id", get(stop_test))
+        .with(AddData::new(tests));
     Server::new(TcpListener::bind("0.0.0.0:3000"))
         .run(app)
         .await
 }
-

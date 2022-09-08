@@ -924,6 +924,7 @@ dependencies = [
 name = "rocust_web"
 version = "0.1.0"
 dependencies = [
+ "parking_lot",
  "poem",
  "rocust_lib",
  "tokio",
