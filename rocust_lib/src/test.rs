@@ -114,26 +114,27 @@ impl Test {
     }
 
     async fn run_update_in_background(&self, thread_sleep_time: u64) {
-        let test_handler = self.clone();
         let background_token = self.background_token.lock().unwrap().clone();
         select! {
             _ = background_token.cancelled() => {
                 println!("test update in background cancelled");
             }
-            _ = tokio::spawn(async move {
-                loop {
-                    println!("updating");
-                    if let Some(elapsed) = Test::calculate_elapsed_time(
-                        *test_handler.start_timestamp.read(),
-                        *test_handler.end_timestamp.read(),
-                    ) {
-                        test_handler.calculate_requests_per_second(&elapsed);
-                    }
-                    tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
-                }
-            }) => {
+            _ = self.update_in_background(thread_sleep_time) => {
 
             }
+        }
+    }
+
+    async fn update_in_background(&self, thread_sleep_time: u64){
+        loop {
+            println!("updating");
+            if let Some(elapsed) = Test::calculate_elapsed_time(
+                *self.start_timestamp.read(),
+                *self.end_timestamp.read(),
+            ) {
+                self.calculate_requests_per_second(&elapsed);
+            }
+            tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
     }
 
