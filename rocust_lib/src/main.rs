@@ -1,4 +1,4 @@
-use rocust_lib::{EndPoint, Method, Test};
+use rocust_lib::{test::Test, EndPoint, Method};
 use std::time::Duration;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
@@ -22,7 +22,7 @@ async fn main() {
     let test_handler = test.clone();
     tokio::spawn(async move {
         println!("canceling test in 200 seconds");
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
         println!("attempting cancel");
         test_handler.stop();
     });
@@ -30,7 +30,7 @@ async fn main() {
     let test_handler = test.clone();
     tokio::spawn(async move {
         println!("canceling user 1 in 2 seconds");
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(8)).await;
         println!("attempting cancel user 1");
         test_handler.stop_a_user(1).unwrap_or_default();
     });
