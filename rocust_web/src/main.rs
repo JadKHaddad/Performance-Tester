@@ -16,7 +16,7 @@ fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
 
     let new_test = Test::new(
         10,
-        Some(5),
+        Some(20),
         5,
         "https://google.com".to_string(),
         vec![

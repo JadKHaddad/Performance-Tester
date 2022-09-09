@@ -99,7 +99,7 @@ impl User {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                println!("user is cancelled");
+                println!("user {} is stopped", self.id);
                 self.set_status(Status::STOPPED);
             }
             _ = self.run_forever() => {

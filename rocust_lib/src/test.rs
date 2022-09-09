@@ -86,19 +86,21 @@ impl Test {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                println!("test cancelled");
+                println!("test stopped");
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::STOPPED);
                 self.stop_users();
                 self.background_token.lock().unwrap().cancel();
             }
             _ = self.select_run_mode_and_run() => {
+                println!("test finished");
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::FINISHED);
                 self.finish_users();
                 self.background_token.lock().unwrap().cancel();
             }
         }
+        println!("stopping users");
     }
 
     fn set_start_timestamp(&self, start_timestamp: Instant) {
@@ -117,12 +119,13 @@ impl Test {
         let background_token = self.background_token.lock().unwrap().clone();
         select! {
             _ = background_token.cancelled() => {
-                println!("test update in background cancelled");
+                
             }
             _ = self.update_in_background(thread_sleep_time) => {
 
             }
         }
+        println!("test update in background stopped");
     }
 
     async fn update_in_background(&self, thread_sleep_time: u64){
