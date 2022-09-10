@@ -87,12 +87,19 @@ impl User {
             global_results,
         }
     }
+
+    fn add_response_time(&self, response_time: u32) {
+        self.global_results.write().add_response_time(response_time);
+    }
+
+    fn add_endpoint_response_time(&self, response_time: u32, _endpoint: &EndPoint){
+        self.add_response_time(response_time);
+    }
 }
 
 macro_rules! impl_UserLike {
     (for $($t:ty),+) => {
         $(impl $t {
-
             fn add_headers(&self, mut request: RequestBuilder, endpoint: &EndPoint) -> RequestBuilder {
                 if let Some(global_headers) = &self.global_headers {
                     for (key, value) in global_headers {
@@ -117,37 +124,6 @@ macro_rules! impl_UserLike {
                     _ = self.run_forever() => {
                         //self.set_status(Status::FINISHED);
                     }
-                }
-            }
-
-            async fn run_forever(&mut self) {
-                self.set_status(Status::RUNNING);
-                loop {
-                    let endpoint = self.select_random_endpoint();
-                    let url = format!("{}{}", self.host, endpoint.get_url());
-                    let mut request = match endpoint.get_method() {
-                        Method::GET => self.client.get(&url),
-                        Method::POST => self.client.post(&url),
-                        Method::PUT => self.client.put(&url),
-                        Method::DELETE => self.client.delete(&url),
-                    };
-                    request = self.add_headers(request, endpoint);
-                    let start = Instant::now();
-                    //TODO ConnectionErrors are not handled here yet
-                    if let Ok(response) = request.send().await {
-                        let duration = start.elapsed();
-                        println!(
-                            "user: {} | {} {} | {:?} | thread id: {:?}",
-                            self.id,
-                            response.status(),
-                            url,
-                            duration,
-                            thread::current().id()
-                        );
-                        //TODO if Super user add the line below else do nothing
-                        //self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
-                    }
-                    tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
                 }
             }
 
@@ -182,13 +158,48 @@ macro_rules! impl_UserLike {
                 let mut rng = rand::thread_rng();
                 rng.gen_range(0..self.sleep)
             }
-
         })*
     };
-
-
 }
 impl_UserLike!(for User, SuperUser);
+
+macro_rules! impl_UserLike_run_forever {
+    (for $($t:ty = ($f:ident) ),+) => {
+        $(impl $t {
+            async fn run_forever(&mut self) {
+                self.set_status(Status::RUNNING);
+                loop {
+                    let endpoint = self.select_random_endpoint();
+                    let url = format!("{}{}", self.host, endpoint.get_url());
+                    let mut request = match endpoint.get_method() {
+                        Method::GET => self.client.get(&url),
+                        Method::POST => self.client.post(&url),
+                        Method::PUT => self.client.put(&url),
+                        Method::DELETE => self.client.delete(&url),
+                    };
+                    request = self.add_headers(request, endpoint);
+                    let start = Instant::now();
+                    //TODO ConnectionErrors are not handled here yet
+                    if let Ok(response) = request.send().await {
+                        let duration = start.elapsed();
+                        println!(
+                            "user: {} | {} {} | {:?} | thread id: {:?}",
+                            self.id,
+                            response.status(),
+                            url,
+                            duration,
+                            thread::current().id()
+                        );
+                        //depinding on user type, add response time to global results ot to endpoint results as well
+                        <$t>::$f(self, duration.as_millis() as u32, endpoint)
+                    }
+                    tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
+                }
+            }
+        })*
+    };
+}
+impl_UserLike_run_forever!(for User = (add_endpoint_response_time), SuperUser = (add_endpoint_response_time));
 
 impl SuperUser {
     pub fn new(
