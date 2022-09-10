@@ -1,3 +1,4 @@
+extern crate prettytable;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt;
@@ -56,7 +57,7 @@ trait Updatble {
 pub struct Results {
     total_requests: u32,
     total_response_time: u32,
-    average_response: u32,
+    average_response_time: u32,
     requests_per_second: f64,
 }
 
@@ -65,7 +66,7 @@ impl Results {
         Results {
             total_requests: 0,
             total_response_time: 0,
-            average_response: 0,
+            average_response_time: 0,
             requests_per_second: 0.0,
         }
     }
@@ -73,7 +74,7 @@ impl Results {
     pub fn add_response_time(&mut self, response_time: u32) {
         self.total_response_time += response_time;
         self.total_requests += 1;
-        self.average_response = self.total_response_time / self.total_requests;
+        self.average_response_time = self.total_response_time / self.total_requests;
     }
 
     fn get_total_requests(&self) -> u32 {
@@ -89,6 +90,7 @@ impl Results {
         let requests_per_second = total_requests as f64 / elapsed.as_secs_f64();
         self.set_requests_per_second(requests_per_second);
     }
+
 }
 
 impl fmt::Display for Results {
@@ -96,7 +98,7 @@ impl fmt::Display for Results {
         write!(
             f,
             "Total Requests [{}] | Requests per Second [{}] | Total Response Time [{}] | Average Response Time [{}]",
-            self.total_requests, self.requests_per_second, self.total_response_time, self.average_response
+            self.total_requests, self.requests_per_second, self.total_response_time, self.average_response_time
         )
     }
 }
@@ -125,6 +127,10 @@ impl EndPoint {
 
     pub fn get_url(&self) -> &String {
         &self.url
+    }
+
+    pub fn get_results(&self) -> &Arc<RwLock<Results>> {
+        &self.results
     }
 
     fn add_response_time(&self, response_time: u32) {

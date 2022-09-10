@@ -1,4 +1,6 @@
 use crate::{EndPoint, Results, Status, Updatble};
+use prettytable::Table;
+use prettytable::row;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt;
@@ -9,7 +11,7 @@ use tokio::select;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use user::SuperUser;
+use user::User;
 pub mod user;
 
 #[derive(Clone, Debug)]
@@ -26,7 +28,7 @@ pub struct Test {
     results: Arc<RwLock<Results>>,
     start_timestamp: Arc<RwLock<Option<Instant>>>,
     end_timestamp: Arc<RwLock<Option<Instant>>>,
-    users: Arc<RwLock<Vec<SuperUser>>>,
+    users: Arc<RwLock<Vec<User>>>,
 }
 
 impl Test {
@@ -55,8 +57,8 @@ impl Test {
         }
     }
 
-    pub fn create_user(&self, id: String) -> SuperUser {
-        let user = SuperUser::new(
+    pub fn create_user(&self, id: String) -> User {
+        let user = User::new(
             id,
             self.sleep,
             self.host.clone(),
@@ -73,7 +75,7 @@ impl Test {
         self.set_status(Status::RUNNING);
         let background_test = self.clone();
         tokio::spawn(async move {
-            background_test.run_update_in_background(2).await;
+            background_test.run_update_in_background(3).await;
         });
         return match self.run_time {
             Some(run_time) => self.run_with_timeout(run_time).await,
@@ -132,15 +134,29 @@ impl Test {
 
     async fn update_in_background(&self, thread_sleep_time: u64){
         loop {
-            println!("updating");
+            //calculate requests per second
             if let Some(elapsed) = Test::calculate_elapsed_time(
                 *self.start_timestamp.read(),
                 *self.end_timestamp.read(),
             ) {
                 self.calculate_requests_per_second(&elapsed);
             }
+            //print stats
+            self.print_stats();
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
+    }
+
+    fn print_stats(&self){
+        let mut table = Table::new();
+        table.add_row(row!["METH", "URL", "TOTAL REQ", "REQ/S", "TOTAL RES TIME", "AVG RES TIME"]);
+        for endpoint in self.endpoints.iter() {
+            let results = endpoint.get_results().read();
+            table.add_row(row![endpoint.get_method(), endpoint.get_url(), results.total_requests, results.requests_per_second, results.total_response_time, results.average_response_time]);
+        }
+        let results = self.results.read();
+        table.add_row(row![" ", "AGR", results.total_requests, results.requests_per_second, results.total_response_time, results.average_response_time]);
+        table.printstd();
     }
 
     async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
@@ -218,7 +234,7 @@ impl Test {
         }
     }
 
-    pub fn get_users(&self) -> &Arc<RwLock<Vec<SuperUser>>> {
+    pub fn get_users(&self) -> &Arc<RwLock<Vec<User>>> {
         &self.users
     }
 
