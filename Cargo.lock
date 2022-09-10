@@ -906,6 +906,11 @@ dependencies = [
 [[package]]
 name = "rocust_cli"
 version = "0.1.0"
+dependencies = [
+ "rocust_lib",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "rocust_lib"
@@ -916,7 +921,6 @@ dependencies = [
  "rand",
  "reqwest",
  "tokio",
- "tokio-scoped",
  "tokio-util",
 ]
 
@@ -1175,16 +1179,6 @@ checksum = "f7d995660bd2b7f8c1568414c1126076c13fbb725c40112dc0120b78eb9b717b"
 dependencies = [
  "native-tls",
  "tokio",
-]
-
-[[package]]
-name = "tokio-scoped"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4beb8ba13bc53ac53ce1d52b42f02e5d8060f0f42138862869beb769722b256"
-dependencies = [
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

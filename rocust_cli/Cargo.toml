@@ -6,3 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rocust_lib = { path = "../rocust_lib"}
+tokio = { version = "1.21.0", features = ["full"] }
+tokio-util = "0.7.3"

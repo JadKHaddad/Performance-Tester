@@ -1,4 +1,4 @@
-use crate::{user::User, EndPoint, Results, Status, Updatble};
+use crate::{EndPoint, Results, Status, Updatble};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt;
@@ -9,6 +9,8 @@ use tokio::select;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+use user::SuperUser;
+pub mod user;
 
 #[derive(Clone, Debug)]
 pub struct Test {
@@ -24,7 +26,7 @@ pub struct Test {
     results: Arc<RwLock<Results>>,
     start_timestamp: Arc<RwLock<Option<Instant>>>,
     end_timestamp: Arc<RwLock<Option<Instant>>>,
-    users: Arc<RwLock<Vec<User>>>,
+    users: Arc<RwLock<Vec<SuperUser>>>,
 }
 
 impl Test {
@@ -53,8 +55,8 @@ impl Test {
         }
     }
 
-    pub fn create_user(&self, id: String) -> User {
-        let user = User::new(
+    pub fn create_user(&self, id: String) -> SuperUser {
+        let user = SuperUser::new(
             id,
             self.sleep,
             self.host.clone(),
@@ -216,7 +218,7 @@ impl Test {
         }
     }
 
-    pub fn get_users(&self) -> &Arc<RwLock<Vec<User>>> {
+    pub fn get_users(&self) -> &Arc<RwLock<Vec<SuperUser>>> {
         &self.users
     }
 

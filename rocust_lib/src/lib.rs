@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub mod test;
-pub mod user;
+
 
 #[derive(Clone, Debug)]
 pub enum Method {
