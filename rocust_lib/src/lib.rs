@@ -4,9 +4,60 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-
+use std::error::Error;
+use chrono::{DateTime, Utc};
+use chrono::format::{DelayedFormat, StrftimeItems};
+use tokio::fs::OpenOptions;
+use tokio::io::AsyncWriteExt;
 pub mod test;
 
+pub enum LogType {
+    INFO,
+    DEBUG,
+    ERROR,
+    TRACE
+}
+
+impl fmt::Display for LogType {
+   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       match self {
+           LogType::INFO => write!(f, "INFO"),
+           LogType::DEBUG => write!(f, "DEBUG"),
+           LogType::ERROR => write!(f, "ERROR"),
+           LogType::TRACE => write!(f, "TRACE")
+       }
+   }
+}
+
+#[derive(Clone, Debug)]
+pub struct Logger {
+    logfile_path: String,
+}
+
+impl Logger {
+    pub fn new(logfile_path: String) -> Logger {
+        Logger {
+            logfile_path,
+        }
+    }
+
+    fn get_date_and_time(&self) -> DelayedFormat<StrftimeItems> {
+        let now: DateTime<Utc> = Utc::now();
+        now.format("%Y.%m.%d %H:%M:%S")
+    }
+
+    pub async fn log(&self, log_type: LogType, message: &String) -> Result<(), Box<dyn Error>> {
+        let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(&self.logfile_path)
+        .await?;
+
+        file.write(format!("{} {} - {}\n", self.get_date_and_time(), log_type, message).as_bytes()).await?;
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Method {

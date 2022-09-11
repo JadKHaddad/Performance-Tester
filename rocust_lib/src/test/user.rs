@@ -1,4 +1,4 @@
-use crate::{EndPoint, Method, Results, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Method, Results, Status, Updatble};
 use parking_lot::RwLock;
 use rand::Rng;
 use reqwest::Client;
@@ -33,6 +33,7 @@ pub struct User {
     global_results: Arc<RwLock<Results>>,
     results: Arc<RwLock<Results>>,
     endpoints: Arc<RwLock<HashMap<String, Results>>>,
+    logger: Arc<Logger>,
 }
 
 impl fmt::Display for User {
@@ -55,6 +56,7 @@ impl User {
         global_endpoints: Arc<Vec<EndPoint>>,
         global_headers: Option<HashMap<String, String>>,
         global_results: Arc<RwLock<Results>>,
+        logger: Arc<Logger>,
     ) -> User {
         User {
             client: Client::new(),
@@ -68,6 +70,7 @@ impl User {
             global_results,
             results: Arc::new(RwLock::new(Results::new())),
             endpoints: Arc::new(RwLock::new(HashMap::new())),
+            logger,
         }
     }
 
@@ -89,7 +92,7 @@ impl User {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                println!("user {} is stopped", self.id);
+                let _ = self.logger.log(LogType::INFO, &format!("User [{}] stopped", self.id)).await;
                 self.set_status(Status::STOPPED);
             }
             _ = self.run_forever() => {
@@ -112,16 +115,22 @@ impl User {
             request = self.add_headers(request, endpoint);
             let start = Instant::now();
             //TODO ConnectionErrors are not handled here yet
-            if let Ok(_response) = request.send().await {
+            if let Ok(response) = request.send().await {
                 let duration = start.elapsed();
-                // println!(
-                //     "user: {} | {} {} | {:?} | thread id: {:?}",
-                //     self.id,
-                //     response.status(),
-                //     url,
-                //     duration,
-                //     thread::current().id()
-                // );
+                let _ = self
+                    .logger
+                    .log(
+                        LogType::INFO,
+                        &format!(
+                            "user: {} | {} {} | {:?}",
+                            self.id,
+                            response.status(),
+                            url,
+                            duration
+                        ),
+                    )
+                    .await;
+
                 self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
             }
             tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;

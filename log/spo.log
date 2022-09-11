@@ -1,4 +1,0 @@
-2022-09-11 17:40:30 - INFO	Test [spo] created
-2022-09-11 17:40:30 - TRACE	deregistering event source from poller
-2022-09-11 17:40:31 - TRACE	registering event source with poller: token=Token(16777217), interests=READABLE | WRITABLE
-2022-09-11 17:40:31 - TRACE	deregistering event source from poller

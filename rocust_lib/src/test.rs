@@ -1,9 +1,4 @@
-use crate::{EndPoint, Results, Status, Updatble};
-use log::LevelFilter;
-use log::info;
-use log4rs::append::file::FileAppender;
-use log4rs::config::{Appender, Config, Root};
-use log4rs::encode::pattern::PatternEncoder;
+use crate::{EndPoint, Results, Status, Updatble, Logger, LogType};
 use parking_lot::RwLock;
 use prettytable::row;
 use prettytable::Table;
@@ -16,8 +11,11 @@ use tokio::select;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+
 use user::User;
 pub mod user;
+
+
 
 #[derive(Clone, Debug)]
 pub struct Test {
@@ -35,6 +33,7 @@ pub struct Test {
     start_timestamp: Arc<RwLock<Option<Instant>>>,
     end_timestamp: Arc<RwLock<Option<Instant>>>,
     users: Arc<RwLock<Vec<User>>>,
+    logger: Arc<Logger>,
 }
 
 impl Test {
@@ -48,26 +47,6 @@ impl Test {
         global_headers: Option<HashMap<String, String>>,
         logfile_path: String,
     ) -> Self {
-        let logfile = FileAppender::builder()
-            .encoder(Box::new(PatternEncoder::new(
-                "{h({d(%Y-%m-%d %H:%M:%S)(utc)} - {l}\t{m}{n})}",
-            )))
-            .build(&logfile_path)
-            .unwrap();
-
-        let config = Config::builder()
-            .appender(Appender::builder().build(id.clone(), Box::new(logfile)))
-            .build(
-                Root::builder()
-                    .appender(id.clone())
-                    .build(LevelFilter::Trace),
-            )
-            .unwrap();
-
-
-        log4rs::init_config(config).unwrap(); // TODO will create an error when creating another test
-        
-        info!(target: &id.clone(), "Test [{}] created", id.clone());
         Self {
             id,
             status: Arc::new(RwLock::new(Status::CREATED)),
@@ -83,6 +62,7 @@ impl Test {
             start_timestamp: Arc::new(RwLock::new(None)),
             end_timestamp: Arc::new(RwLock::new(None)),
             users: Arc::new(RwLock::new(Vec::new())),
+            logger: Arc::new(Logger::new(logfile_path)),
         }
     }
 
@@ -94,6 +74,7 @@ impl Test {
             self.endpoints.clone(),
             self.global_headers.clone(),
             self.results.clone(),
+            self.logger.clone(),
         );
         self.users.write().push(user.clone());
         user
@@ -119,21 +100,20 @@ impl Test {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                println!("test stopped");
+                let _ = self.logger.log(LogType::INFO, &format!("test stopped")).await;
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::STOPPED);
                 self.stop_users();
                 self.background_token.lock().unwrap().cancel();
             }
             _ = self.select_run_mode_and_run() => {
-                println!("test finished");
+                let _ = self.logger.log(LogType::INFO, &format!("test finished")).await;
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::FINISHED);
                 self.finish_users();
                 self.background_token.lock().unwrap().cancel();
             }
         }
-        println!("stopping users");
     }
 
     fn set_start_timestamp(&self, start_timestamp: Instant) {
@@ -158,7 +138,7 @@ impl Test {
 
             }
         }
-        println!("test update in background stopped");
+        let _ = self.logger.log(LogType::INFO, &format!("test update in background stopped")).await;
     }
 
     async fn update_in_background(&self, thread_sleep_time: u64) {
@@ -218,19 +198,19 @@ impl Test {
         let mut join_handles = vec![];
         for i in 0..self.user_count {
             let user_id = i;
-            println!("spawning user: {}", user_id);
+            let _ = self.logger.log(LogType::INFO, &format!("spawning user: {}", user_id)).await;
             let mut user = self.create_user(user_id.to_string());
             let join_handle = tokio::spawn(async move {
                 user.run().await;
             });
             join_handles.push(join_handle);
         }
-        println!("all users have been spawned");
+        let _ = self.logger.log(LogType::INFO, &format!("all users have been spawned")).await;
         for join_handle in join_handles {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("error: {}", e);
+                    let _ = self.logger.log(LogType::ERROR, &format!("{}", e)).await;
                 }
             }
         }
