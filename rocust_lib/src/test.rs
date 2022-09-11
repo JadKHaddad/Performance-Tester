@@ -1,7 +1,12 @@
 use crate::{EndPoint, Results, Status, Updatble};
-use prettytable::Table;
-use prettytable::row;
+use log::LevelFilter;
+use log::info;
+use log4rs::append::file::FileAppender;
+use log4rs::config::{Appender, Config, Root};
+use log4rs::encode::pattern::PatternEncoder;
 use parking_lot::RwLock;
+use prettytable::row;
+use prettytable::Table;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -16,6 +21,7 @@ pub mod user;
 
 #[derive(Clone, Debug)]
 pub struct Test {
+    id: String,
     status: Arc<RwLock<Status>>,
     token: Arc<Mutex<CancellationToken>>,
     background_token: Arc<Mutex<CancellationToken>>,
@@ -33,14 +39,37 @@ pub struct Test {
 
 impl Test {
     pub fn new(
+        id: String,
         user_count: u32,
         run_time: Option<u64>,
         sleep: u64,
         host: String,
         endpoints: Vec<EndPoint>,
         global_headers: Option<HashMap<String, String>>,
+        logfile_path: String,
     ) -> Self {
+        let logfile = FileAppender::builder()
+            .encoder(Box::new(PatternEncoder::new(
+                "{h({d(%Y-%m-%d %H:%M:%S)(utc)} - {l}\t{m}{n})}",
+            )))
+            .build(&logfile_path)
+            .unwrap();
+
+        let config = Config::builder()
+            .appender(Appender::builder().build(id.clone(), Box::new(logfile)))
+            .build(
+                Root::builder()
+                    .appender(id.clone())
+                    .build(LevelFilter::Trace),
+            )
+            .unwrap();
+
+
+        log4rs::init_config(config).unwrap(); // TODO will create an error when creating another test
+        
+        info!(target: &id.clone(), "Test [{}] created", id.clone());
         Self {
+            id,
             status: Arc::new(RwLock::new(Status::CREATED)),
             token: Arc::new(Mutex::new(CancellationToken::new())),
             background_token: Arc::new(Mutex::new(CancellationToken::new())),
@@ -123,7 +152,7 @@ impl Test {
         let background_token = self.background_token.lock().unwrap().clone();
         select! {
             _ = background_token.cancelled() => {
-                
+
             }
             _ = self.update_in_background(thread_sleep_time) => {
 
@@ -132,7 +161,7 @@ impl Test {
         println!("test update in background stopped");
     }
 
-    async fn update_in_background(&self, thread_sleep_time: u64){
+    async fn update_in_background(&self, thread_sleep_time: u64) {
         loop {
             //calculate requests per second
             if let Some(elapsed) = Test::calculate_elapsed_time(
@@ -147,22 +176,42 @@ impl Test {
         }
     }
 
-    fn print_stats(&self){
+    fn print_stats(&self) {
         let mut table = Table::new();
-        table.add_row(row!["METH", "URL", "TOTAL REQ", "REQ/S", "TOTAL RES TIME", "AVG RES TIME"]);
+        table.add_row(row![
+            "METH",
+            "URL",
+            "TOTAL REQ",
+            "REQ/S",
+            "TOTAL RES TIME",
+            "AVG RES TIME"
+        ]);
         for endpoint in self.endpoints.iter() {
             let results = endpoint.get_results().read();
-            table.add_row(row![endpoint.get_method(), endpoint.get_url(), results.total_requests, results.requests_per_second, results.total_response_time, results.average_response_time]);
+            table.add_row(row![
+                endpoint.get_method(),
+                endpoint.get_url(),
+                results.total_requests,
+                results.requests_per_second,
+                results.total_response_time,
+                results.average_response_time
+            ]);
         }
         let results = self.results.read();
-        table.add_row(row![" ", "AGR", results.total_requests, results.requests_per_second, results.total_response_time, results.average_response_time]);
+        table.add_row(row![
+            " ",
+            "AGR",
+            results.total_requests,
+            results.requests_per_second,
+            results.total_response_time,
+            results.average_response_time
+        ]);
         table.printstd();
     }
 
     async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
         let future = self.run_forever();
         timeout(Duration::from_secs(time_out), future).await
-        
     }
 
     async fn run_forever(&mut self) {

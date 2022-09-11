@@ -4,6 +4,7 @@ use std::time::Duration;
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
 async fn main() {
     let mut test = Test::new(
+        String::from("Test1"),
         2,
         Some(30),
         5,
@@ -16,6 +17,7 @@ async fn main() {
             EndPoint::new(Method::DELETE, "/delete".to_string(), None),
         ],
         None,
+        format!("log/{}.log", "Test1")
     );
     println!("test created {}", test);
 

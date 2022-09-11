@@ -15,8 +15,9 @@ fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
     let mut tests = tests.write();
 
     let new_test = Test::new(
+        id.clone(),
         10,
-        Some(20),
+        Some(50),
         5,
         "https://google.com".to_string(),
         vec![
@@ -27,6 +28,7 @@ fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
             EndPoint::new(Method::DELETE, "/delete".to_string(), None),
         ],
         None,
+        format!("log/{}.log", id),
     );
 
     tests.insert(id.clone(), new_test);
