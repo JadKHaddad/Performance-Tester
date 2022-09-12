@@ -140,7 +140,8 @@ impl Test {
         }
         let _ = self
             .logger
-            .log_buffed(LogType::INFO, &format!("test update in background stopped")).await;
+            .log_buffed(LogType::INFO, &format!("test update in background stopped"))
+            .await;
     }
 
     async fn update_in_background(&self, thread_sleep_time: u64) {
@@ -204,7 +205,8 @@ impl Test {
             let user_id = i;
             let _ = self
                 .logger
-                .log_buffed(LogType::INFO, &format!("spawning user: {}", user_id)).await;
+                .log_buffed(LogType::INFO, &format!("spawning user: {}", user_id))
+                .await;
             let mut user = self.create_user(user_id.to_string());
             let join_handle = tokio::spawn(async move {
                 user.run().await;
@@ -213,12 +215,16 @@ impl Test {
         }
         let _ = self
             .logger
-            .log_buffed(LogType::INFO, &format!("all users have been spawned")).await;
+            .log_buffed(LogType::INFO, &format!("all users have been spawned"))
+            .await;
         for join_handle in join_handles {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    let _ = self.logger.log_buffed(LogType::ERROR, &format!("{}", e)).await;
+                    let _ = self
+                        .logger
+                        .log_buffed(LogType::ERROR, &format!("{}", e))
+                        .await;
                 }
             }
         }
@@ -300,6 +306,15 @@ impl fmt::Display for Test {
             self.end_timestamp,
             self.get_elapsed_time()
         )
+    }
+}
+
+impl Drop for Test {
+    fn drop(&mut self) {
+        self.token.lock().unwrap().cancel(); //stop main thread
+        self.background_token.lock().unwrap().cancel(); //stop background thread
+        self.stop_users(); //stop all users
+        self.logger.set_running(false); //stop logger, logger will not use a buffer anymore
     }
 }
 

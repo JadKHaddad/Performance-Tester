@@ -4,22 +4,21 @@ use std::time::Duration;
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
 async fn main() {
     let mut test = Test::new(
-        String::from("Test1"),
-        2,
-        Some(30),
+        String::from("test1"),
+        300,
+        Some(60),
         5,
         "https://google.com".to_string(),
         vec![
             EndPoint::new(Method::GET, "/".to_string(), None),
-            EndPoint::new(Method::GET, "/get".to_string(), None),
-            EndPoint::new(Method::POST, "/post".to_string(), None),
-            EndPoint::new(Method::PUT, "/put".to_string(), None),
-            EndPoint::new(Method::DELETE, "/delete".to_string(), None),
+            // EndPoint::new(Method::GET, "/get".to_string(), None),
+            // EndPoint::new(Method::POST, "/post".to_string(), None),
+            // EndPoint::new(Method::PUT, "/put".to_string(), None),
+            // EndPoint::new(Method::DELETE, "/delete".to_string(), None),
         ],
         None,
-        format!("log/{}.log", "Test1")
+        format!("log/{}.log", "test1")
     );
-    println!("test created {}", test);
 
     // let test_handler = test.clone();
     // tokio::spawn(async move {

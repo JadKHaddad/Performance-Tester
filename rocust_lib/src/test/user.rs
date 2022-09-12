@@ -92,13 +92,15 @@ impl User {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                let _ = self.logger.log_buffed(LogType::INFO, &format!("User [{}] stopped", self.id)).await;
+
                 self.set_status(Status::STOPPED);
             }
             _ = self.run_forever() => {
                 //self.set_status(Status::FINISHED);
             }
         }
+        let _ = self.logger.log_buffed(LogType::INFO, &format!("User [{}] stopped", self.id)).await;
+        println!("User [{}] stopped", self.id);
     }
 
     async fn run_forever(&mut self) {
@@ -128,7 +130,8 @@ impl User {
                             url,
                             duration
                         ),
-                    ).await;
+                    )
+                    .await;
                 self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
             }
             tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
@@ -179,6 +182,12 @@ impl User {
             .or_insert(Results::new())
             .add_response_time(response_time);
         self.add_response_time(response_time);
+    }
+}
+
+impl Drop for User {
+    fn drop(&mut self) {
+        self.token.lock().unwrap().cancel(); //stop main thread
     }
 }
 
