@@ -1,4 +1,4 @@
-use crate::{EndPoint, Results, Status, Updatble, Logger, LogType};
+use crate::{EndPoint, LogType, Logger, Results, Status, Updatble};
 use parking_lot::RwLock;
 use prettytable::row;
 use prettytable::Table;
@@ -14,8 +14,6 @@ use tokio_util::sync::CancellationToken;
 
 use user::User;
 pub mod user;
-
-
 
 #[derive(Clone, Debug)]
 pub struct Test {
@@ -83,6 +81,7 @@ impl Test {
     async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
         self.set_start_timestamp(Instant::now());
         self.set_status(Status::RUNNING);
+        self.logger.set_running(true);
         let background_test = self.clone();
         tokio::spawn(async move {
             background_test.run_update_in_background(3).await;
@@ -100,20 +99,21 @@ impl Test {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                let _ = self.logger.log(LogType::INFO, &format!("test stopped")).await;
+                let _ = self.logger.log_buffed(LogType::INFO, &format!("test stopped")).await;
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::STOPPED);
                 self.stop_users();
-                self.background_token.lock().unwrap().cancel();
             }
             _ = self.select_run_mode_and_run() => {
-                let _ = self.logger.log(LogType::INFO, &format!("test finished")).await;
+                let _ = self.logger.log_buffed(LogType::INFO, &format!("test finished")).await;
                 self.set_end_timestamp(Instant::now());
                 self.set_status(Status::FINISHED);
                 self.finish_users();
-                self.background_token.lock().unwrap().cancel();
             }
         }
+        self.background_token.lock().unwrap().cancel();
+        let _ = self.logger.flush_buffer().await;
+        self.logger.set_running(false);
     }
 
     fn set_start_timestamp(&self, start_timestamp: Instant) {
@@ -138,7 +138,9 @@ impl Test {
 
             }
         }
-        let _ = self.logger.log(LogType::INFO, &format!("test update in background stopped")).await;
+        let _ = self
+            .logger
+            .log_buffed(LogType::INFO, &format!("test update in background stopped")).await;
     }
 
     async fn update_in_background(&self, thread_sleep_time: u64) {
@@ -152,6 +154,8 @@ impl Test {
             }
             //print stats
             self.print_stats();
+            //log
+            let _ = self.logger.flush_buffer().await;
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
     }
@@ -198,19 +202,23 @@ impl Test {
         let mut join_handles = vec![];
         for i in 0..self.user_count {
             let user_id = i;
-            let _ = self.logger.log(LogType::INFO, &format!("spawning user: {}", user_id)).await;
+            let _ = self
+                .logger
+                .log_buffed(LogType::INFO, &format!("spawning user: {}", user_id)).await;
             let mut user = self.create_user(user_id.to_string());
             let join_handle = tokio::spawn(async move {
                 user.run().await;
             });
             join_handles.push(join_handle);
         }
-        let _ = self.logger.log(LogType::INFO, &format!("all users have been spawned")).await;
+        let _ = self
+            .logger
+            .log_buffed(LogType::INFO, &format!("all users have been spawned")).await;
         for join_handle in join_handles {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    let _ = self.logger.log(LogType::ERROR, &format!("{}", e)).await;
+                    let _ = self.logger.log_buffed(LogType::ERROR, &format!("{}", e)).await;
                 }
             }
         }

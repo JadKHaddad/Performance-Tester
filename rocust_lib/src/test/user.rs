@@ -92,7 +92,7 @@ impl User {
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-                let _ = self.logger.log(LogType::INFO, &format!("User [{}] stopped", self.id)).await;
+                let _ = self.logger.log_buffed(LogType::INFO, &format!("User [{}] stopped", self.id)).await;
                 self.set_status(Status::STOPPED);
             }
             _ = self.run_forever() => {
@@ -119,7 +119,7 @@ impl User {
                 let duration = start.elapsed();
                 let _ = self
                     .logger
-                    .log(
+                    .log_buffed(
                         LogType::INFO,
                         &format!(
                             "user: {} | {} {} | {:?}",
@@ -128,9 +128,7 @@ impl User {
                             url,
                             duration
                         ),
-                    )
-                    .await;
-
+                    ).await;
                 self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
             }
             tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;

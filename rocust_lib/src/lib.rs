@@ -2,6 +2,7 @@ extern crate prettytable;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use std::error::Error;
@@ -31,14 +32,22 @@ impl fmt::Display for LogType {
 
 #[derive(Clone, Debug)]
 pub struct Logger {
+    running: Arc<RwLock<bool>>,
     logfile_path: String,
+    buffer: Arc<RwLock<Vec<String>>>
 }
 
 impl Logger {
     pub fn new(logfile_path: String) -> Logger {
         Logger {
+            running: Arc::new(RwLock::new(false)),
             logfile_path,
+            buffer: Arc::new(RwLock::new(Vec::new()))
         }
+    }
+
+    pub fn set_running(&self, running: bool) {
+        *self.running.write() = running;
     }
 
     fn get_date_and_time(&self) -> DelayedFormat<StrftimeItems> {
@@ -46,7 +55,40 @@ impl Logger {
         now.format("%Y.%m.%d %H:%M:%S")
     }
 
-    pub async fn log(&self, log_type: LogType, message: &String) -> Result<(), Box<dyn Error>> {
+    fn format_message(&self, log_type: LogType, message: &str) -> String{
+        format!("{} {} {}", self.get_date_and_time(), log_type, message)
+    }
+
+    pub async fn log_buffed(&self, log_type: LogType, message: &str)  -> Result<(), Box<dyn Error>>{
+        self.buffer.write().push(self.format_message(log_type ,message));
+        if !*self.running.read() {
+            let _ = self.flush_buffer().await;
+        }
+        Ok(())
+    }
+
+    pub async fn flush_buffer(&self)  -> Result<(), Box<dyn Error>>{
+        let mut result = String::new();
+        {
+            let mut buffer = self.buffer.write();        
+            for message in buffer.iter() {
+                result.push_str(message);
+                result.push_str("\n");
+            }
+            buffer.clear();
+        }
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(&self.logfile_path)
+            .await?;
+        file.write(result.as_bytes()).await?;
+        Ok(())
+    }
+
+    pub async fn log(&self, log_type: LogType, message: &str) -> Result<(), Box<dyn Error>> {
         let mut file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -54,7 +96,7 @@ impl Logger {
         .open(&self.logfile_path)
         .await?;
 
-        file.write(format!("{} {} - {}\n", self.get_date_and_time(), log_type, message).as_bytes()).await?;
+        file.write(self.format_message(log_type ,message).as_bytes()).await?;
         Ok(())
     }
 }

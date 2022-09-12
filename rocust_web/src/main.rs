@@ -16,9 +16,9 @@ fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
 
     let new_test = Test::new(
         id.clone(),
-        10,
+        300,
         Some(50),
-        5,
+        3,
         "https://google.com".to_string(),
         vec![
             EndPoint::new(Method::GET, "/".to_string(), None),
