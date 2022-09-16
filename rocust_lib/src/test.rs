@@ -115,7 +115,7 @@ impl Test {
         for i in 0..self.user_count {
             let user_id = i;
             self.logger
-                .log_buffed(LogType::INFO, &format!("spawning user: {}", user_id));
+                .log_buffed(LogType::INFO, &format!("Spawning user: [{}]", user_id));
             let mut user = self.create_user(user_id.to_string());
             let user_join_handle = tokio::spawn(async move {
                 user.run().await;
@@ -123,7 +123,7 @@ impl Test {
             user_join_handles.push(user_join_handle);
         }
         self.logger
-            .log_buffed(LogType::INFO, &format!("all users have been spawned"));
+            .log_buffed(LogType::INFO, &format!("All users have been spawned"));
         for join_handle in user_join_handles {
             match join_handle.await {
                 Ok(_) => {}
@@ -135,7 +135,7 @@ impl Test {
         }
         self.set_end_timestamp(Instant::now());
         self.logger
-            .log_buffed(LogType::INFO, &format!("all users have been stopped"));
+            .log_buffed(LogType::INFO, &format!("All users have been stopped"));
         //stop background thread
         self.background_token.lock().unwrap().cancel();
         match background_join_handle.await {
@@ -145,7 +145,7 @@ impl Test {
             }
         }
         self.logger
-            .log_buffed(LogType::INFO, &format!("test update in background stopped"));
+            .log_buffed(LogType::INFO, &format!("Background thread stopped"));
         //flush buffer
         let _ = self.logger.flush_buffer().await;
     }
@@ -170,17 +170,12 @@ impl Test {
                 user.stop();
                 Ok(())
             }
-            None => Err(String::from("user not found")),
+            None => Err(String::from("User not found")),
         }
     }
 
     pub fn stop(&self) {
-        match *self.status.read() {
-            Status::RUNNING => {
-                self.set_status(Status::STOPPED);
-            }
-            _ => {}
-        }
+        self.set_status(Status::STOPPED);
         for user in self.users.read().iter() {
             user.stop();
         }

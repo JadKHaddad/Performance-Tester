@@ -120,7 +120,7 @@ impl User {
                 self.logger.log_buffed(
                     LogType::INFO,
                     &format!(
-                        "user: [{}] | {} {} | {:?}",
+                        "User: [{}] | {} {} | {:?}",
                         self.id,
                         response.status(),
                         url,
@@ -135,18 +135,19 @@ impl User {
     }
 
     pub fn stop(&self) {
-        match *self.status.read() {
-            Status::RUNNING => {
-                self.set_status(Status::STOPPED);
-            }
-            _ => {}
-        }
         self.token.lock().unwrap().cancel();
+        self.set_status(Status::STOPPED);
     }
 
     pub fn finish(&self) {
-        self.set_status(Status::FINISHED);
         self.token.lock().unwrap().cancel();
+        let current_status = self.status.read().clone();
+        match current_status {
+            Status::STOPPED => {}
+            _ => {
+                self.set_status(Status::FINISHED);
+            }
+        }
     }
 
     fn set_status(&self, status: Status) {
