@@ -16,6 +16,7 @@ pub enum LogType {
     DEBUG,
     ERROR,
     TRACE,
+    WARNING,
 }
 
 impl fmt::Display for LogType {
@@ -25,6 +26,7 @@ impl fmt::Display for LogType {
             LogType::DEBUG => write!(f, "DEBUG"),
             LogType::ERROR => write!(f, "ERROR"),
             LogType::TRACE => write!(f, "TRACE"),
+            LogType::WARNING => write!(f, "WARNING"),
         }
     }
 }

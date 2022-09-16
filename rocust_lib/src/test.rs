@@ -170,7 +170,16 @@ impl Test {
                 user.stop();
                 Ok(())
             }
-            None => Err(String::from("User not found")),
+            None => {
+                self.logger.log_buffed(
+                    LogType::WARNING,
+                    &format!(
+                        "Attempting to stop a user [{}] that does not exist",
+                        user_id
+                    ),
+                );
+                Err(String::from("User not found"))
+            }
         }
     }
 

@@ -37,6 +37,13 @@ async fn main() {
         println!("attempting cancel user 0");
         test_handler.stop_a_user(0).unwrap_or_default();
     });
+    let test_handler = test.clone();
+    tokio::spawn(async move {
+        println!("canceling user 563 in 3 seconds");
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        println!("attempting cancel user 563");
+        test_handler.stop_a_user(563).unwrap_or_default();
+    });
 
     // let test_handler = test.clone();
     // tokio::spawn(async move {
