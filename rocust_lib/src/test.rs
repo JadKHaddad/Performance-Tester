@@ -8,8 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 use tokio::select;
-use tokio::time::error::Elapsed;
-use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use user::User;
@@ -19,7 +17,6 @@ pub mod user;
 pub struct Test {
     id: String,
     status: Arc<RwLock<Status>>,
-    token: Arc<Mutex<CancellationToken>>,
     background_token: Arc<Mutex<CancellationToken>>,
     user_count: u32,
     run_time: Option<u64>,
@@ -48,7 +45,6 @@ impl Test {
         Self {
             id,
             status: Arc::new(RwLock::new(Status::CREATED)),
-            token: Arc::new(Mutex::new(CancellationToken::new())),
             background_token: Arc::new(Mutex::new(CancellationToken::new())),
             user_count,
             run_time,
@@ -64,70 +60,6 @@ impl Test {
         }
     }
 
-    pub fn create_user(&self, id: String) -> User {
-        let user = User::new(
-            id,
-            self.sleep,
-            self.host.clone(),
-            self.endpoints.clone(),
-            self.global_headers.clone(),
-            self.results.clone(),
-            self.logger.clone(),
-        );
-        self.users.write().push(user.clone());
-        user
-    }
-
-    async fn select_run_mode_and_run(&mut self) -> Result<(), Elapsed> {
-        self.set_start_timestamp(Instant::now());
-        self.set_status(Status::RUNNING);
-        self.logger.set_running(true);
-        let background_test = self.clone();
-        tokio::spawn(async move {
-            background_test.run_update_in_background(3).await;
-        });
-        return match self.run_time {
-            Some(run_time) => self.run_with_timeout(run_time).await,
-            None => {
-                self.run_forever().await;
-                Ok(())
-            }
-        };
-    }
-
-    pub async fn run(&mut self) {
-        let token = self.token.lock().unwrap().clone();
-        select! {
-            _ = token.cancelled() => {
-                let _ = self.logger.log_buffed(LogType::INFO, &format!("test stopped")).await;
-                self.set_end_timestamp(Instant::now());
-                self.set_status(Status::STOPPED);
-                self.stop_users();
-            }
-            _ = self.select_run_mode_and_run() => {
-                let _ = self.logger.log_buffed(LogType::INFO, &format!("test finished")).await;
-                self.set_end_timestamp(Instant::now());
-                self.set_status(Status::FINISHED);
-                self.finish_users();
-            }
-        }
-        self.background_token.lock().unwrap().cancel();
-        let _ = self.logger.flush_buffer().await;
-        self.logger.set_running(false);
-    }
-
-    fn set_start_timestamp(&self, start_timestamp: Instant) {
-        *self.start_timestamp.write() = Some(start_timestamp);
-    }
-
-    fn set_end_timestamp(&self, end_timestamp: Instant) {
-        *self.end_timestamp.write() = Some(end_timestamp);
-    }
-
-    fn set_status(&self, status: Status) {
-        *self.status.write() = status;
-    }
-
     async fn run_update_in_background(&self, thread_sleep_time: u64) {
         let background_token = self.background_token.lock().unwrap().clone();
         select! {
@@ -138,10 +70,6 @@ impl Test {
 
             }
         }
-        let _ = self
-            .logger
-            .log_buffed(LogType::INFO, &format!("test update in background stopped"))
-            .await;
     }
 
     async fn update_in_background(&self, thread_sleep_time: u64) {
@@ -159,6 +87,122 @@ impl Test {
             let _ = self.logger.flush_buffer().await;
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
+    }
+
+    pub async fn run(&mut self) {
+        self.set_start_timestamp(Instant::now());
+        self.set_status(Status::RUNNING);
+        //run background thread
+        let test_handle = self.clone();
+        let background_join_handle = tokio::spawn(async move {
+            test_handle.run_update_in_background(1).await;
+        });
+        //set run time
+        let mut run_message = String::from("Test running forever, press ctrl+c to stop");
+        if let Some(run_time) = self.run_time {
+            run_message = format!("Test running for {} seconds", run_time);
+            let test_handle = self.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(run_time)).await;
+                test_handle.finish();
+                test_handle
+                    .logger
+                    .log_buffed(LogType::INFO, &format!("Test finished"));
+            });
+        }
+        self.logger.log_buffed(LogType::INFO, &run_message);
+        let mut user_join_handles = vec![];
+        for i in 0..self.user_count {
+            let user_id = i;
+            self.logger
+                .log_buffed(LogType::INFO, &format!("spawning user: {}", user_id));
+            let mut user = self.create_user(user_id.to_string());
+            let user_join_handle = tokio::spawn(async move {
+                user.run().await;
+            });
+            user_join_handles.push(user_join_handle);
+        }
+        self.logger
+            .log_buffed(LogType::INFO, &format!("all users have been spawned"));
+        for join_handle in user_join_handles {
+            match join_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error while joining user: {}", e);
+                    self.logger.log_buffed(LogType::ERROR, &format!("{}", e));
+                }
+            }
+        }
+        self.set_end_timestamp(Instant::now());
+        self.logger
+            .log_buffed(LogType::INFO, &format!("all users have been stopped"));
+        //stop background thread
+        self.background_token.lock().unwrap().cancel();
+        match background_join_handle.await {
+            Ok(_) => {}
+            Err(e) => {
+                self.logger.log_buffed(LogType::ERROR, &format!("{}", e));
+            }
+        }
+        self.logger
+            .log_buffed(LogType::INFO, &format!("test update in background stopped"));
+        //flush buffer
+        let _ = self.logger.flush_buffer().await;
+    }
+
+    pub fn create_user(&self, id: String) -> User {
+        let user = User::new(
+            id,
+            self.sleep,
+            self.host.clone(),
+            self.endpoints.clone(),
+            self.global_headers.clone(),
+            self.results.clone(),
+            self.logger.clone(),
+        );
+        self.users.write().push(user.clone());
+        user
+    }
+
+    pub fn stop_a_user(&self, user_id: usize) -> Result<(), String> {
+        match self.users.read().get(user_id) {
+            Some(user) => {
+                user.stop();
+                Ok(())
+            }
+            None => Err(String::from("user not found")),
+        }
+    }
+
+    pub fn stop(&self) {
+        match *self.status.read() {
+            Status::RUNNING => {
+                self.set_status(Status::STOPPED);
+            }
+            _ => {}
+        }
+        for user in self.users.read().iter() {
+            user.stop();
+        }
+    }
+
+    fn finish(&self) {
+        self.set_status(Status::FINISHED);
+        for user in self.users.read().iter() {
+            user.finish();
+        }
+    }
+
+    fn set_start_timestamp(&self, start_timestamp: Instant) {
+        *self.start_timestamp.write() = Some(start_timestamp);
+    }
+
+    fn set_end_timestamp(&self, end_timestamp: Instant) {
+        *self.end_timestamp.write() = Some(end_timestamp);
+    }
+
+    fn set_status(&self, status: Status) {
+        *self.status.write() = status;
     }
 
     fn print_stats(&self) {
@@ -194,70 +238,6 @@ impl Test {
         table.printstd();
     }
 
-    async fn run_with_timeout(&mut self, time_out: u64) -> Result<(), Elapsed> {
-        let future = self.run_forever();
-        timeout(Duration::from_secs(time_out), future).await
-    }
-
-    async fn run_forever(&mut self) {
-        let mut join_handles = vec![];
-        for i in 0..self.user_count {
-            let user_id = i;
-            let _ = self
-                .logger
-                .log_buffed(LogType::INFO, &format!("spawning user: {}", user_id))
-                .await;
-            let mut user = self.create_user(user_id.to_string());
-            let join_handle = tokio::spawn(async move {
-                user.run().await;
-            });
-            join_handles.push(join_handle);
-        }
-        let _ = self
-            .logger
-            .log_buffed(LogType::INFO, &format!("all users have been spawned"))
-            .await;
-        for join_handle in join_handles {
-            match join_handle.await {
-                Ok(_) => {}
-                Err(e) => {
-                    let _ = self
-                        .logger
-                        .log_buffed(LogType::ERROR, &format!("{}", e))
-                        .await;
-                }
-            }
-        }
-    }
-
-    pub fn stop(&self) {
-        self.token.lock().unwrap().cancel();
-    }
-
-    pub fn stop_a_user(&self, user_id: usize) -> Result<(), String> {
-        match self.users.read().get(user_id) {
-            Some(user) => {
-                user.stop();
-                Ok(())
-            }
-            None => Err(String::from("user not found")),
-        }
-    }
-
-    pub fn stop_users(&self) {
-        for user in self.users.read().iter() {
-            user.stop();
-            user.set_status_with_check(Status::STOPPED);
-        }
-    }
-
-    pub fn finish_users(&self) {
-        for user in self.users.read().iter() {
-            user.stop();
-            user.set_status_with_check(Status::FINISHED);
-        }
-    }
-
     pub fn get_elapsed_time(&self) -> Option<Duration> {
         match (*self.start_timestamp.read(), *self.end_timestamp.read()) {
             (Some(start), Some(end)) => Some(end.duration_since(start)),
@@ -288,6 +268,10 @@ impl Test {
     pub fn get_status(&self) -> &Arc<RwLock<Status>> {
         &self.status
     }
+
+    pub fn get_id(&self) -> &String {
+        &self.id
+    }
 }
 
 impl fmt::Display for Test {
@@ -311,10 +295,8 @@ impl fmt::Display for Test {
 
 impl Drop for Test {
     fn drop(&mut self) {
-        self.token.lock().unwrap().cancel(); //stop main thread
-        self.background_token.lock().unwrap().cancel(); //stop background thread
-        self.stop_users(); //stop all users
-        self.logger.set_running(false); //stop logger, logger will not use a buffer anymore
+        //println!("Test dropped");
+        //self.stop(); //if we stop on drop might be a problem because we might have clones!
     }
 }
 

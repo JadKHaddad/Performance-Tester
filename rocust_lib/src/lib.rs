@@ -1,13 +1,12 @@
 extern crate prettytable;
+use chrono::format::{DelayedFormat, StrftimeItems};
+use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use std::error::Error;
-use chrono::{DateTime, Utc};
-use chrono::format::{DelayedFormat, StrftimeItems};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 pub mod test;
@@ -16,38 +15,32 @@ pub enum LogType {
     INFO,
     DEBUG,
     ERROR,
-    TRACE
+    TRACE,
 }
 
 impl fmt::Display for LogType {
-   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-       match self {
-           LogType::INFO => write!(f, "INFO"),
-           LogType::DEBUG => write!(f, "DEBUG"),
-           LogType::ERROR => write!(f, "ERROR"),
-           LogType::TRACE => write!(f, "TRACE")
-       }
-   }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LogType::INFO => write!(f, "INFO"),
+            LogType::DEBUG => write!(f, "DEBUG"),
+            LogType::ERROR => write!(f, "ERROR"),
+            LogType::TRACE => write!(f, "TRACE"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Logger {
-    running: Arc<RwLock<bool>>,
     logfile_path: String,
-    buffer: Arc<RwLock<Vec<String>>>
+    buffer: Arc<RwLock<Vec<String>>>,
 }
 
 impl Logger {
     pub fn new(logfile_path: String) -> Logger {
         Logger {
-            running: Arc::new(RwLock::new(false)),
             logfile_path,
-            buffer: Arc::new(RwLock::new(Vec::new()))
+            buffer: Arc::new(RwLock::new(Vec::new())),
         }
-    }
-
-    pub fn set_running(&self, running: bool) {
-        *self.running.write() = running;
     }
 
     fn get_date_and_time(&self) -> DelayedFormat<StrftimeItems> {
@@ -55,22 +48,20 @@ impl Logger {
         now.format("%Y.%m.%d %H:%M:%S")
     }
 
-    fn format_message(&self, log_type: LogType, message: &str) -> String{
+    fn format_message(&self, log_type: LogType, message: &str) -> String {
         format!("{} {} {}", self.get_date_and_time(), log_type, message)
     }
 
-    pub async fn log_buffed(&self, log_type: LogType, message: &str)  -> Result<(), Box<dyn Error>>{
-        self.buffer.write().push(self.format_message(log_type ,message));
-        if !*self.running.read() {
-            let _ = self.flush_buffer().await;
-        }
-        Ok(())
+    pub fn log_buffed(&self, log_type: LogType, message: &str) {
+        self.buffer
+            .write()
+            .push(self.format_message(log_type, message));
     }
 
-    pub async fn flush_buffer(&self)  -> Result<(), Box<dyn Error>>{
+    pub async fn flush_buffer(&self) -> Result<(), Box<dyn Error>> {
         let mut result = String::new();
         {
-            let mut buffer = self.buffer.write();        
+            let mut buffer = self.buffer.write();
             for message in buffer.iter() {
                 result.push_str(message);
                 result.push_str("\n");
@@ -90,13 +81,14 @@ impl Logger {
 
     pub async fn log(&self, log_type: LogType, message: &str) -> Result<(), Box<dyn Error>> {
         let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open(&self.logfile_path)
-        .await?;
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(&self.logfile_path)
+            .await?;
 
-        file.write(self.format_message(log_type ,message).as_bytes()).await?;
+        file.write(self.format_message(log_type, message).as_bytes())
+            .await?;
         Ok(())
     }
 }
@@ -183,7 +175,6 @@ impl Results {
         let requests_per_second = total_requests as f64 / elapsed.as_secs_f64();
         self.set_requests_per_second(requests_per_second);
     }
-
 }
 
 impl fmt::Display for Results {

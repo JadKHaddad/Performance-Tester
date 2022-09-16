@@ -93,14 +93,12 @@ impl User {
         select! {
             _ = token.cancelled() => {
 
-                self.set_status(Status::STOPPED);
             }
             _ = self.run_forever() => {
-                //self.set_status(Status::FINISHED);
             }
         }
-        let _ = self.logger.log_buffed(LogType::INFO, &format!("User [{}] stopped", self.id)).await;
-        println!("User [{}] stopped", self.id);
+        self.logger
+            .log_buffed(LogType::INFO, &format!("User [{}] stopped", self.id));
     }
 
     async fn run_forever(&mut self) {
@@ -119,19 +117,17 @@ impl User {
             //TODO ConnectionErrors are not handled here yet
             if let Ok(response) = request.send().await {
                 let duration = start.elapsed();
-                let _ = self
-                    .logger
-                    .log_buffed(
-                        LogType::INFO,
-                        &format!(
-                            "user: {} | {} {} | {:?}",
-                            self.id,
-                            response.status(),
-                            url,
-                            duration
-                        ),
-                    )
-                    .await;
+                self.logger.log_buffed(
+                    LogType::INFO,
+                    &format!(
+                        "user: [{}] | {} {} | {:?}",
+                        self.id,
+                        response.status(),
+                        url,
+                        duration
+                    ),
+                );
+
                 self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
             }
             tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
@@ -139,24 +135,22 @@ impl User {
     }
 
     pub fn stop(&self) {
+        match *self.status.read() {
+            Status::RUNNING => {
+                self.set_status(Status::STOPPED);
+            }
+            _ => {}
+        }
+        self.token.lock().unwrap().cancel();
+    }
+
+    pub fn finish(&self) {
+        self.set_status(Status::FINISHED);
         self.token.lock().unwrap().cancel();
     }
 
     fn set_status(&self, status: Status) {
         *self.status.write() = status;
-    }
-
-    pub fn set_status_with_check(&self, status: Status) {
-        let current_status = self.status.read().clone();
-        match (current_status, &status) {
-            (Status::RUNNING, _) => {
-                *self.status.write() = status;
-            }
-            (Status::STOPPED, Status::FINISHED) => {
-                *self.status.write() = status;
-            }
-            _ => {}
-        }
     }
 
     fn select_random_endpoint(&self) -> &EndPoint {

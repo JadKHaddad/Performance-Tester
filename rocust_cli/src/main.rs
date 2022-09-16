@@ -5,8 +5,8 @@ use std::time::Duration;
 async fn main() {
     let mut test = Test::new(
         String::from("test1"),
-        300,
-        Some(60),
+        20,
+        Some(5),
         5,
         "https://google.com".to_string(),
         vec![
@@ -20,13 +20,7 @@ async fn main() {
         format!("log/{}.log", "test1")
     );
 
-    // let test_handler = test.clone();
-    // tokio::spawn(async move {
-    //     println!("canceling test in 200 seconds");
-    //     tokio::time::sleep(Duration::from_secs(200)).await;
-    //     println!("attempting cancel");
-    //     test_handler.stop();
-    // });
+
 
     // let test_handler = test.clone();
     // tokio::spawn(async move {
@@ -44,29 +38,42 @@ async fn main() {
     //     test_handler.stop_a_user(15).unwrap_or_default();
     // });
 
+    let test_handler = test.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            println!("STATUS: [{}]", test_handler.get_status().read());
+        }
+    });
+
+    //test.run().await;
+
+
     // let test_handler = test.clone();
     // tokio::spawn(async move {
-    //     loop {
-    //         tokio::time::sleep(Duration::from_secs(3)).await;
-    //         println!("STATUS: [{}]", test_handler.get_status().read());
-    //     }
+    //     println!("canceling test in 5 seconds");
+    //     tokio::time::sleep(Duration::from_secs(5)).await;
+    //     println!("attempting cancel");
+    //     //test_handler.stop();
+    //     test_handler.stop();
     // });
 
     test.run().await;
-    // println!("\n{}", test);
+
+    println!("\n{}", test);
     // println!();
     // let endpoints = test.get_endpoints();
     // for endpoint in endpoints.iter() {
     //     println!("{}", endpoint);
     //     println!("------------------------------");
     // }
-    // println!();
-    // let users = test.get_users();
-    // for user in users.read().iter() {
-    //     println!("{}\n", user);
-    //     for (endpoint_url, results) in user.get_endpoints().read().iter() {
-    //         println!("\t[{}] | [{}]\n", endpoint_url, results);
-    //     }
-    //     println!("------------------------------");
-    // }
+    println!();
+    let users = test.get_users();
+    for user in users.read().iter() {
+        println!("{}\n", user);
+        // for (endpoint_url, results) in user.get_endpoints().read().iter() {
+        //     println!("\t[{}] | [{}]\n", endpoint_url, results);
+        // }
+        println!("------------------------------");
+    }
 }
