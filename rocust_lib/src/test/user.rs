@@ -26,7 +26,7 @@ pub struct User {
     token: Arc<Mutex<CancellationToken>>,
     status: Arc<RwLock<Status>>,
     id: String,
-    sleep: u64,
+    sleep: (u64, u64),
     host: Arc<String>,
     global_endpoints: Arc<Vec<EndPoint>>,
     global_headers: Option<HashMap<String, String>>,
@@ -51,7 +51,7 @@ impl fmt::Display for User {
 impl User {
     pub fn new(
         id: String,
-        sleep: u64,
+        sleep: (u64, u64),
         host: Arc<String>,
         global_endpoints: Arc<Vec<EndPoint>>,
         global_headers: Option<HashMap<String, String>>,
@@ -104,12 +104,49 @@ impl User {
     async fn run_forever(&mut self) {
         self.set_status(Status::RUNNING);
         loop {
+            tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
             let endpoint = self.select_random_endpoint();
             let url = format!("{}{}", self.host, endpoint.get_url());
             let mut request = match endpoint.get_method() {
-                Method::GET => self.client.get(&url),
-                Method::POST => self.client.post(&url),
-                Method::PUT => self.client.put(&url),
+                /*
+                 Method::GET(params) => {
+                    let mut request = self.client.get(&url);
+                    if let Some(params) = params {
+                        request = request.query(params);
+                    }
+                    request
+
+                },
+                Method::POST(body) => {
+                    let mut request = self.client.post(&url);
+                    if let Some(body) = body {
+                        request = request.body(body.to_owned());
+                    }
+                    request
+
+                }
+                */
+                Method::GET => {
+                    let mut request = self.client.get(&url);
+                    if let Some(ref params) = endpoint.params {
+                        request = request.query(params);
+                    }
+                    request
+                }
+                Method::POST => {
+                    let mut request = self.client.post(&url);
+                    if let Some(ref body) = endpoint.body {
+                        request = request.body(body.to_owned());
+                    }
+                    request
+                }
+                Method::PUT => {
+                    let mut request = self.client.put(&url);
+                    if let Some(ref body) = endpoint.body {
+                        request = request.body(body.to_owned());
+                    }
+                    request
+                }
                 Method::DELETE => self.client.delete(&url),
             };
             request = self.add_headers(request, endpoint);
@@ -147,7 +184,6 @@ impl User {
                 //connection error. This will not increase the failed counter or the request counter. It has also no response time
                 self.add_endpoint_connection_error(endpoint);
             }
-            tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
         }
     }
 
@@ -179,7 +215,7 @@ impl User {
 
     fn select_random_sleep(&self) -> u64 {
         let mut rng = rand::thread_rng();
-        rng.gen_range(0..self.sleep)
+        rng.gen_range(self.sleep.0..self.sleep.1)
     }
 
     pub fn get_endpoints(&self) -> &Arc<RwLock<HashMap<String, Results>>> {

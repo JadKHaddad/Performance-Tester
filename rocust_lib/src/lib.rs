@@ -237,18 +237,56 @@ impl fmt::Display for Results {
 pub struct EndPoint {
     method: Method,
     url: String,
+    params: Option<Vec<(String, String)>>,
+    body: Option<String>,
     results: Arc<RwLock<Results>>,
     headers: Option<HashMap<String, String>>,
 }
 
 impl EndPoint {
-    pub fn new(method: Method, url: String, headers: Option<HashMap<String, String>>) -> EndPoint {
+    fn new(
+        method: Method,
+        url: String,
+        headers: Option<HashMap<String, String>>,
+        params: Option<Vec<(String, String)>>,
+        body: Option<String>,
+    ) -> EndPoint {
         EndPoint {
             method,
             url,
+            params,
+            body,
             results: Arc::new(RwLock::new(Results::new())),
             headers,
         }
+    }
+
+    pub fn new_get(
+        url: String,
+        headers: Option<HashMap<String, String>>,
+        params: Option<Vec<(String, String)>>,
+    ) -> EndPoint {
+        EndPoint::new(Method::GET, url, headers, params, None)
+    }
+
+    pub fn new_post(
+        url: String,
+        headers: Option<HashMap<String, String>>,
+        body: Option<String>,
+    ) -> EndPoint {
+        EndPoint::new(Method::POST, url, headers, None, body)
+    }
+
+    pub fn new_put(
+        url: String,
+        headers: Option<HashMap<String, String>>,
+        body: Option<String>,
+    ) -> EndPoint {
+        EndPoint::new(Method::PUT, url, headers, None, body)
+    }
+
+    pub fn new_delete(url: String, headers: Option<HashMap<String, String>>) -> EndPoint {
+        EndPoint::new(Method::DELETE, url, headers, None, None)
     }
 
     pub fn get_method(&self) -> &Method {
@@ -261,6 +299,14 @@ impl EndPoint {
 
     pub fn get_results(&self) -> &Arc<RwLock<Results>> {
         &self.results
+    }
+
+    pub fn get_params(&self) -> &Option<Vec<(String, String)>> {
+        &self.params
+    }
+
+    pub fn get_body(&self) -> &Option<String> {
+        &self.body
     }
 
     fn add_response_time(&self, response_time: u32) {

@@ -1,4 +1,4 @@
-use rocust_lib::{test::Test, EndPoint, Method};
+use rocust_lib::{test::Test, EndPoint};
 use std::time::Duration;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
@@ -7,21 +7,18 @@ async fn main() {
         String::from("test1"),
         20,
         Some(10),
-        5,
+        (1, 10),
         "https://google.com".to_string(),
         vec![
-            EndPoint::new(Method::GET, "/".to_string(), None),
-            EndPoint::new(Method::GET, "/asd".to_string(), None),
-            // EndPoint::new(Method::GET, "/get".to_string(), None),
-            // EndPoint::new(Method::POST, "/post".to_string(), None),
-            // EndPoint::new(Method::PUT, "/put".to_string(), None),
-            // EndPoint::new(Method::DELETE, "/delete".to_string(), None),
+            EndPoint::new_get("/".to_string(), None, Some(vec![(String::from("id"), String::from("6"))])),
+            EndPoint::new_get("/get".to_string(), None, None),
+            EndPoint::new_post("/post".to_string(), None, Some(String::from("this is body"))),
+            EndPoint::new_put("/put".to_string(), None, None),
+            EndPoint::new_delete("/delete".to_string(), None),
         ],
         None,
-        format!("log/{}.log", "test1")
+        format!("log/{}.log", "test1"),
     );
-
-
 
     // let test_handler = test.clone();
     // tokio::spawn(async move {
@@ -55,7 +52,6 @@ async fn main() {
     // });
 
     //test.run().await;
-
 
     let test_handler = test.clone();
     tokio::spawn(async move {
