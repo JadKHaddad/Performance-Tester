@@ -14,3 +14,9 @@ parking_lot = "0.12.1"
 tokio-util = "0.7.3"
 prettytable-rs = "^0.9"
 chrono = "0.4.22"
+
+axum = {version = "0.5.16", features = ["ws", "headers"]}
+headers = "0.3"
+tower-http = { version = "0.3.0", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -10,7 +10,8 @@ use std::time::Duration;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 pub mod test;
-
+pub mod master;
+pub mod worker;
 pub enum LogType {
     INFO,
     DEBUG,
