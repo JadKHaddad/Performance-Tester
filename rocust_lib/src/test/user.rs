@@ -98,7 +98,7 @@ impl User {
             }
         }
         self.logger
-            .log_buffed(LogType::INFO, &format!("User [{}] stopped", self.id));
+            .log_buffered(LogType::INFO, &format!("User [{}] stopped", self.id));
     }
 
     async fn run_forever(&mut self) {
@@ -114,10 +114,9 @@ impl User {
             };
             request = self.add_headers(request, endpoint);
             let start = Instant::now();
-            //TODO ConnectionErrors are not handled here yet
             if let Ok(response) = request.send().await {
                 let duration = start.elapsed();
-                self.logger.log_buffed(
+                self.logger.log_buffered(
                     LogType::INFO,
                     &format!(
                         "User: [{}] | {} {} | {:?}",
@@ -127,8 +126,26 @@ impl User {
                         duration
                     ),
                 );
-
-                self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
+                let status_code = response.status().as_u16();
+                if status_code >= 200 && status_code < 400 {
+                    self.add_endpoint_response_time(duration.as_millis() as u32, endpoint);
+                } else {
+                    //failed request. It has no response time
+                    self.add_endpoint_failed(endpoint);
+                }
+            } else {
+                self.logger.log_buffered(
+                    LogType::ERROR,
+                    &format!(
+                        "User: [{}] | {} {} | {:?}",
+                        self.id,
+                        "ConnectionError",
+                        url,
+                        start.elapsed()
+                    ),
+                );
+                //connection error. This will not increase the failed counter or the request counter. It has also no response time
+                self.add_endpoint_connection_error(endpoint);
             }
             tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
         }
@@ -169,6 +186,26 @@ impl User {
         &self.endpoints
     }
 
+    fn add_endpoint_failed(&self, endpoint: &EndPoint) {
+        endpoint.add_failed();
+        self.endpoints
+            .write()
+            .entry(endpoint.url.clone())
+            .or_insert(Results::new())
+            .add_failed();
+        self.add_failed();
+    }
+
+    fn add_endpoint_connection_error(&self, endpoint: &EndPoint) {
+        endpoint.add_connection_error();
+        self.endpoints
+            .write()
+            .entry(endpoint.url.clone())
+            .or_insert(Results::new())
+            .add_connection_error();
+        self.add_connection_error();
+    }
+
     fn add_endpoint_response_time(&self, response_time: u32, endpoint: &EndPoint) {
         endpoint.add_response_time(response_time);
         self.endpoints
@@ -192,6 +229,16 @@ impl Updatble for User {
         self.results.write().add_response_time(response_time);
     }
 
+    fn add_failed(&self) {
+        self.global_results.write().add_failed();
+        self.results.write().add_failed();
+    }
+
+    fn add_connection_error(&self) {
+        self.global_results.write().add_connection_error();
+        self.results.write().add_connection_error();
+    }
+
     fn set_requests_per_second(&self, requests_per_second: f64) {
         self.results
             .write()
@@ -202,6 +249,15 @@ impl Updatble for User {
         self.results.write().calculate_requests_per_second(elapsed);
         for (_, endpoint_result) in self.endpoints.write().iter_mut() {
             endpoint_result.calculate_requests_per_second(elapsed);
+        }
+    }
+
+    fn calculate_failed_requests_per_second(&self, elapsed: &Duration) {
+        self.results
+            .write()
+            .calculate_failed_requests_per_second(elapsed);
+        for (_, endpoint_result) in self.endpoints.write().iter_mut() {
+            endpoint_result.calculate_failed_requests_per_second(elapsed);
         }
     }
 

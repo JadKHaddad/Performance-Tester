@@ -11,6 +11,7 @@ async fn main() {
         "https://google.com".to_string(),
         vec![
             EndPoint::new(Method::GET, "/".to_string(), None),
+            EndPoint::new(Method::GET, "/asd".to_string(), None),
             // EndPoint::new(Method::GET, "/get".to_string(), None),
             // EndPoint::new(Method::POST, "/post".to_string(), None),
             // EndPoint::new(Method::PUT, "/put".to_string(), None),

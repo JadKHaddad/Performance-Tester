@@ -80,6 +80,7 @@ impl Test {
                 *self.end_timestamp.read(),
             ) {
                 self.calculate_requests_per_second(&elapsed);
+                self.calculate_failed_requests_per_second(&elapsed);
             }
             //print stats
             self.print_stats();
@@ -107,15 +108,15 @@ impl Test {
                 test_handle.finish();
                 test_handle
                     .logger
-                    .log_buffed(LogType::INFO, &format!("Test finished"));
+                    .log_buffered(LogType::INFO, &format!("Test finished"));
             });
         }
-        self.logger.log_buffed(LogType::INFO, &run_message);
+        self.logger.log_buffered(LogType::INFO, &run_message);
         let mut user_join_handles = vec![];
         for i in 0..self.user_count {
             let user_id = i;
             self.logger
-                .log_buffed(LogType::INFO, &format!("Spawning user: [{}]", user_id));
+                .log_buffered(LogType::INFO, &format!("Spawning user: [{}]", user_id));
             let mut user = self.create_user(user_id.to_string());
             let user_join_handle = tokio::spawn(async move {
                 user.run().await;
@@ -123,29 +124,29 @@ impl Test {
             user_join_handles.push(user_join_handle);
         }
         self.logger
-            .log_buffed(LogType::INFO, &format!("All users have been spawned"));
+            .log_buffered(LogType::INFO, &format!("All users have been spawned"));
         for join_handle in user_join_handles {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error while joining user: {}", e);
-                    self.logger.log_buffed(LogType::ERROR, &format!("{}", e));
+                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
                 }
             }
         }
         self.set_end_timestamp(Instant::now());
         self.logger
-            .log_buffed(LogType::INFO, &format!("All users have been stopped"));
+            .log_buffered(LogType::INFO, &format!("All users have been stopped"));
         //stop background thread
         self.background_token.lock().unwrap().cancel();
         match background_join_handle.await {
             Ok(_) => {}
             Err(e) => {
-                self.logger.log_buffed(LogType::ERROR, &format!("{}", e));
+                self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
             }
         }
         self.logger
-            .log_buffed(LogType::INFO, &format!("Background thread stopped"));
+            .log_buffered(LogType::INFO, &format!("Background thread stopped"));
         //flush buffer
         let _ = self.logger.flush_buffer().await;
     }
@@ -171,7 +172,7 @@ impl Test {
                 Ok(())
             }
             None => {
-                self.logger.log_buffed(
+                self.logger.log_buffered(
                     LogType::WARNING,
                     &format!(
                         "Attempting to stop a user [{}] that does not exist",
@@ -215,9 +216,14 @@ impl Test {
             "METH",
             "URL",
             "TOTAL REQ",
+            "REQ FAILED",
+            "CONN ERR",
             "REQ/S",
+            "FAILED REQ/S",
             "TOTAL RES TIME",
-            "AVG RES TIME"
+            "AVG RES TIME",
+            "MIN RES TIME",
+            "MAX RES TIME",
         ]);
         for endpoint in self.endpoints.iter() {
             let results = endpoint.get_results().read();
@@ -225,9 +231,14 @@ impl Test {
                 endpoint.get_method(),
                 endpoint.get_url(),
                 results.total_requests,
+                results.total_failed_requests,
+                results.total_connection_errors,
                 results.requests_per_second,
+                results.failed_requests_per_second,
                 results.total_response_time,
-                results.average_response_time
+                results.average_response_time,
+                results.min_response_time,
+                results.max_response_time,
             ]);
         }
         let results = self.results.read();
@@ -235,9 +246,14 @@ impl Test {
             " ",
             "AGR",
             results.total_requests,
+            results.total_failed_requests,
+            results.total_connection_errors,
             results.requests_per_second,
+            results.failed_requests_per_second,
             results.total_response_time,
-            results.average_response_time
+            results.average_response_time,
+            results.min_response_time,
+            results.max_response_time,
         ]);
         table.printstd();
     }
@@ -309,6 +325,14 @@ impl Updatble for Test {
         self.results.write().add_response_time(response_time);
     }
 
+    fn add_failed(&self) {
+        self.results.write().add_failed();
+    }
+
+    fn add_connection_error(&self) {
+        self.results.write().add_connection_error();
+    }
+
     fn set_requests_per_second(&self, requests_per_second: f64) {
         self.results
             .write()
@@ -322,6 +346,18 @@ impl Updatble for Test {
         }
         for endpoint in self.endpoints.iter() {
             endpoint.calculate_requests_per_second(elapsed);
+        }
+    }
+
+    fn calculate_failed_requests_per_second(&self, elapsed: &Duration) {
+        self.results
+            .write()
+            .calculate_failed_requests_per_second(elapsed);
+        for user in self.users.read().iter() {
+            user.calculate_failed_requests_per_second(elapsed);
+        }
+        for endpoint in self.endpoints.iter() {
+            endpoint.calculate_failed_requests_per_second(elapsed);
         }
     }
 
