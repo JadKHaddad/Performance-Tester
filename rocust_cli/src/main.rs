@@ -1,4 +1,4 @@
-use rocust_lib::{test::Test, EndPoint, master::Master};
+use rocust_lib::{test::Test, EndPoint, master::Master, worker::Worker};
 use std::time::Duration;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
@@ -25,7 +25,16 @@ async fn main() {
     );
 
     let master = Master::new(2, test.clone(), [127,0,0,1], 8080);
-    master.run().await;
+    let worker = Worker::new(None, [127,0,0,1], 8080);
+
+    tokio::spawn(async move {
+        master.run_forever().await;
+    });
+
+    worker.connect().unwrap();
+    //tokio::time::sleep(Duration::from_secs(60)).await;
+
+    
     // let test_handler = test.clone();
     // tokio::spawn(async move {
     //     println!("canceling user 1 in 50 seconds");

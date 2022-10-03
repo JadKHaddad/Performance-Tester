@@ -2,6 +2,7 @@ extern crate prettytable;
 use chrono::format::{DelayedFormat, StrftimeItems};
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -9,8 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-pub mod test;
+
 pub mod master;
+pub mod test;
 pub mod worker;
 pub enum LogType {
     INFO,
@@ -96,7 +98,7 @@ impl Logger {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Method {
     GET,
     POST,
@@ -115,7 +117,7 @@ impl fmt::Display for Method {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Status {
     CREATED,
     RUNNING,
@@ -144,7 +146,7 @@ trait Updatble {
     fn get_results(&self) -> Arc<RwLock<Results>>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Results {
     total_requests: u32,
     total_failed_requests: u32,
@@ -234,14 +236,30 @@ impl fmt::Display for Results {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SerDeserEndpoint {
+    pub method: Method,
+    pub url: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub params: Option<Vec<(String, String)>>,
+    pub body: Option<String>,
+}
+
+impl SerDeserEndpoint {
+    //TODO
+    pub fn into_endpoint(self) -> EndPoint {
+        EndPoint::new(self.method, self.url, self.headers, self.params, self.body)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct EndPoint {
     method: Method,
     url: String,
+    headers: Option<HashMap<String, String>>,
     params: Option<Vec<(String, String)>>,
     body: Option<String>,
     results: Arc<RwLock<Results>>,
-    headers: Option<HashMap<String, String>>,
 }
 
 impl EndPoint {
@@ -260,6 +278,10 @@ impl EndPoint {
             results: Arc::new(RwLock::new(Results::new())),
             headers,
         }
+    }
+
+    pub fn into_serdeserendpoint(self) -> SerDeserEndpoint {
+        todo!()
     }
 
     pub fn new_get(

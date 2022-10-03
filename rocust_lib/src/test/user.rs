@@ -1,8 +1,9 @@
-use crate::{EndPoint, LogType, Logger, Method, Results, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Method, Results, SerDeserEndpoint, Status, Updatble};
 use parking_lot::RwLock;
 use rand::Rng;
 use reqwest::Client;
 use reqwest::RequestBuilder;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -18,6 +19,37 @@ pub enum UserBehaviour {
     AGGRESSIVE,
     PASSIVE,
     LAZY,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SerDeserUser {
+    pub status: Status,
+    pub id: String,
+    pub sleep: (u64, u64),
+    pub host: String,
+    pub endpoints: Vec<SerDeserEndpoint>,
+    pub global_endpoints: Vec<SerDeserEndpoint>,
+    pub global_headers: Option<HashMap<String, String>>,
+}
+
+impl SerDeserUser {
+    // TODO
+    pub fn into_user(self, global_results: Arc<RwLock<Results>>, logger: Arc<Logger>) -> User {
+        User::new(
+            self.id,
+            self.sleep,
+            Arc::new(self.host),
+            Arc::new(
+                self.global_endpoints
+                    .into_iter()
+                    .map(|e| e.into_endpoint())
+                    .collect(),
+            ),
+            self.global_headers,
+            global_results,
+            logger,
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -250,6 +282,10 @@ impl User {
             .or_insert(Results::new())
             .add_response_time(response_time);
         self.add_response_time(response_time);
+    }
+
+    pub fn into_serdeseruser(self) -> SerDeserUser {
+        todo!()
     }
 }
 

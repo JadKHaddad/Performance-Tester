@@ -1,7 +1,8 @@
-use crate::{EndPoint, LogType, Logger, Results, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Results, SerDeserEndpoint, Status, Updatble};
 use parking_lot::RwLock;
 use prettytable::row;
 use prettytable::Table;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -10,9 +11,58 @@ use std::time::Instant;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
-use user::User;
+use user::{SerDeserUser, User};
 pub mod user;
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SerDeserTest {
+    pub id: String,
+    pub status: Status,
+    //background token
+    pub user_count: u32,
+    pub run_time: Option<u64>,
+    pub sleep: (u64, u64),
+    pub host: String,
+    pub endpoints: Vec<SerDeserEndpoint>,
+    pub global_headers: Option<HashMap<String, String>>,
+    pub results: Results,
+    pub start_timestamp: Option<u64>, // TODO
+    pub end_timestamp: Option<u64>,   // TODO
+    pub users: Vec<SerDeserUser>,
+}
+
+impl SerDeserTest {
+    pub fn into_test(self, logfile_path: String) -> Test {
+        let results = Arc::new(RwLock::new(self.results));
+        let logger = Arc::new(Logger::new(logfile_path));
+        Test {
+            id: self.id,
+            status: Arc::new(RwLock::new(self.status)),
+            background_token: Arc::new(Mutex::new(CancellationToken::new())),
+            user_count: self.user_count,
+            run_time: self.run_time,
+            sleep: self.sleep,
+            host: Arc::new(self.host),
+            endpoints: Arc::new(
+                self.endpoints
+                    .into_iter()
+                    .map(|e| e.into_endpoint())
+                    .collect(),
+            ),
+            global_headers: self.global_headers,
+            results: results.clone(),
+            start_timestamp: Arc::new(RwLock::new(None)),
+            end_timestamp: Arc::new(RwLock::new(None)),
+            users: Arc::new(RwLock::new(
+                self.users
+                    .into_iter()
+                    .map(|u| u.into_user(results.clone(), logger.clone()))
+                    .collect(),
+            )),
+            logger: logger,
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Test {
     id: String,
@@ -58,6 +108,10 @@ impl Test {
             users: Arc::new(RwLock::new(Vec::new())),
             logger: Arc::new(Logger::new(logfile_path)),
         }
+    }
+
+    pub fn into_serdesertest(self) -> SerDeserTest {
+        todo!()
     }
 
     async fn run_update_in_background(&self, thread_sleep_time: u64) {
