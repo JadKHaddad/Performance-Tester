@@ -1,4 +1,4 @@
-use crate::{EndPoint, LogType, Logger, Results, SerDeserEndpoint, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Results, SerDeserEndpoint, Status, Updatble, serde_rw_lock, serde_arc, serde_mutex_cancalation_token};
 use parking_lot::RwLock;
 use prettytable::row;
 use prettytable::Table;
@@ -10,6 +10,7 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+
 
 use user::{SerDeserUser, User};
 pub mod user;
@@ -63,21 +64,30 @@ impl SerDeserTest {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug/* , Deserialize, Serialize*/)]
 pub struct Test {
     id: String,
+    //#[serde(with = "serde_rw_lock")]
     status: Arc<RwLock<Status>>,
+    //#[serde(with = "serde_mutex_cancalation_token")]
     background_token: Arc<Mutex<CancellationToken>>,
     user_count: u32,
     run_time: Option<u64>,
     sleep: (u64, u64),
+    //#[serde(with = "serde_arc")]
     host: Arc<String>,
+    //#[serde(with = "serde_arc")]
     endpoints: Arc<Vec<EndPoint>>,
     global_headers: Option<HashMap<String, String>>,
+    //#[serde(with = "serde_rw_lock")]
     results: Arc<RwLock<Results>>,
+    //#[serde(with = "serde_rw_lock")] // TODO 
     start_timestamp: Arc<RwLock<Option<Instant>>>,
+    //#[serde(with = "serde_rw_lock")] // TODO 
     end_timestamp: Arc<RwLock<Option<Instant>>>,
+    //#[serde(with = "serde_rw_lock")]
     users: Arc<RwLock<Vec<User>>>,
+    //#[serde(with = "serde_arc")]
     logger: Arc<Logger>,
 }
 

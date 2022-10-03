@@ -252,13 +252,14 @@ impl SerDeserEndpoint {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EndPoint {
     method: Method,
     url: String,
     headers: Option<HashMap<String, String>>,
     params: Option<Vec<(String, String)>>,
     body: Option<String>,
+    #[serde(with = "serde_rw_lock")]
     results: Arc<RwLock<Results>>,
 }
 
@@ -388,5 +389,76 @@ impl Updatble for EndPoint {
 
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
+    }
+}
+
+mod serde_rw_lock {
+    use parking_lot::RwLock;
+    use serde::{
+        Deserialize, Deserializer, Serialize, Serializer,
+    };
+    use std::sync::Arc;
+
+    pub fn serialize<S, T>(val: &Arc<RwLock<T>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        T::serialize(&*val.read(), s)
+    }
+
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<RwLock<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Ok(Arc::new(RwLock::new(T::deserialize(d)?)))
+    }
+}
+
+mod serde_mutex_cancalation_token {
+    use serde::{
+        Deserialize, Deserializer, Serialize, Serializer,
+    };
+    use tokio_util::sync::CancellationToken;
+    use std::sync::{Arc, Mutex};
+
+    pub fn serialize<S, T>(val: &Arc<Mutex<CancellationToken>>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        String::from("Token").serialize(s)
+    }
+
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<Mutex<CancellationToken>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Ok(Arc::new(Mutex::new(CancellationToken::new())))
+    }
+}
+
+mod serde_arc {
+    use serde::{
+        Deserialize, Deserializer, Serialize, Serializer,
+    };
+    use std::sync::Arc;
+
+    pub fn serialize<S, T>(val: &Arc<T>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        T::serialize(&*val, s)
+    }
+
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Ok(Arc::new(T::deserialize(d)?))
     }
 }
