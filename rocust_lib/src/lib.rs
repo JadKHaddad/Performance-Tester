@@ -2,7 +2,11 @@ extern crate prettytable;
 use chrono::format::{DelayedFormat, StrftimeItems};
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{MapAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -95,6 +99,65 @@ impl Logger {
         file.write(self.format_message(log_type, message).as_bytes())
             .await?;
         Ok(())
+    }
+}
+
+impl Serialize for Logger {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Logger", 1)?;
+        state.serialize_field("logfile_path", &self.logfile_path)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Logger {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct LoggerVisitor;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            LogfilePath,
+        }
+        impl<'de> Visitor<'de> for LoggerVisitor {
+            type Value = Logger;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct Logger")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Logger, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut logfile_path: Option<String> = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::LogfilePath => {
+                            if logfile_path.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            logfile_path = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let logfile_path =
+                    logfile_path.ok_or_else(|| serde::de::Error::missing_field("logfile_path"))?;
+
+                Ok(Logger {
+                    logfile_path,
+                    buffer: Arc::new(RwLock::new(Vec::new())),
+                })
+            }
+        }
+        const FIELDS: &'static [&'static str] = &["logfile_path"];
+        deserializer.deserialize_struct("Logger", &FIELDS, LoggerVisitor)
     }
 }
 
@@ -236,31 +299,128 @@ impl fmt::Display for Results {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SerDeserEndpoint {
-    pub method: Method,
-    pub url: String,
-    pub headers: Option<HashMap<String, String>>,
-    pub params: Option<Vec<(String, String)>>,
-    pub body: Option<String>,
-}
-
-impl SerDeserEndpoint {
-    //TODO
-    pub fn into_endpoint(self) -> EndPoint {
-        EndPoint::new(self.method, self.url, self.headers, self.params, self.body)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct EndPoint {
     method: Method,
     url: String,
     headers: Option<HashMap<String, String>>,
     params: Option<Vec<(String, String)>>,
     body: Option<String>,
-    #[serde(with = "serde_rw_lock")]
     results: Arc<RwLock<Results>>,
+}
+
+impl Serialize for EndPoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("EndPoint", 6)?;
+        state.serialize_field("method", &self.method)?;
+        state.serialize_field("url", &self.url)?;
+        state.serialize_field("headers", &self.headers)?;
+        state.serialize_field("params", &self.params)?;
+        state.serialize_field("body", &self.body)?;
+        state.serialize_field("results", &*self.results.read())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for EndPoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct EndPointVisitor;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Method,
+            Url,
+            Headers,
+            Params,
+            Body,
+            Results,
+        }
+        impl<'de> Visitor<'de> for EndPointVisitor {
+            type Value = EndPoint;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct EndPoint")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<EndPoint, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut method: Option<Method> = None;
+                let mut url: Option<String> = None;
+                let mut headers: Option<Option<HashMap<String, String>>> = None;
+                let mut params: Option<Option<Vec<(String, String)>>> = None;
+                let mut body: Option<Option<String>> = None;
+                let mut results: Option<Results> = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Method => {
+                            if method.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            method = Some(map.next_value()?);
+                        }
+                        Field::Url => {
+                            if url.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            url = Some(map.next_value()?);
+                        }
+                        Field::Headers => {
+                            if headers.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            headers = Some(map.next_value()?);
+                        }
+                        Field::Params => {
+                            if params.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            params = Some(map.next_value()?);
+                        }
+                        Field::Body => {
+                            if body.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            body = Some(map.next_value()?);
+                        }
+                        Field::Results => {
+                            if results.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logfile_path"));
+                            }
+                            results = Some(map.next_value()?);
+                        }
+                    }
+                }
+                let method = method.ok_or_else(|| serde::de::Error::missing_field("method"))?;
+                let url = url.ok_or_else(|| serde::de::Error::missing_field("url"))?;
+                let headers = headers.ok_or_else(|| serde::de::Error::missing_field("headers"))?;
+                let params = params.ok_or_else(|| serde::de::Error::missing_field("params"))?;
+                let body = body.ok_or_else(|| serde::de::Error::missing_field("body"))?;
+                let results = results.ok_or_else(|| serde::de::Error::missing_field("results"))?;
+
+                Ok(EndPoint {
+                    method,
+                    url,
+                    params,
+                    body,
+                    results: Arc::new(RwLock::new(results)),
+                    headers,
+                })
+            }
+        }
+        const FIELDS: &'static [&'static str] =
+            &["method", "url", "headers", "params", "body", "results"];
+        deserializer.deserialize_struct("EndPoint", &FIELDS, EndPointVisitor)
+    }
 }
 
 impl EndPoint {
@@ -279,10 +439,6 @@ impl EndPoint {
             results: Arc::new(RwLock::new(Results::new())),
             headers,
         }
-    }
-
-    pub fn into_serdeserendpoint(self) -> SerDeserEndpoint {
-        todo!()
     }
 
     pub fn new_get(
@@ -389,76 +545,5 @@ impl Updatble for EndPoint {
 
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
-    }
-}
-
-mod serde_rw_lock {
-    use parking_lot::RwLock;
-    use serde::{
-        Deserialize, Deserializer, Serialize, Serializer,
-    };
-    use std::sync::Arc;
-
-    pub fn serialize<S, T>(val: &Arc<RwLock<T>>, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: Serialize,
-    {
-        T::serialize(&*val.read(), s)
-    }
-
-    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<RwLock<T>>, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: Deserialize<'de>,
-    {
-        Ok(Arc::new(RwLock::new(T::deserialize(d)?)))
-    }
-}
-
-mod serde_mutex_cancalation_token {
-    use serde::{
-        Deserialize, Deserializer, Serialize, Serializer,
-    };
-    use tokio_util::sync::CancellationToken;
-    use std::sync::{Arc, Mutex};
-
-    pub fn serialize<S, T>(val: &Arc<Mutex<CancellationToken>>, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: Serialize,
-    {
-        String::from("Token").serialize(s)
-    }
-
-    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<Mutex<CancellationToken>>, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: Deserialize<'de>,
-    {
-        Ok(Arc::new(Mutex::new(CancellationToken::new())))
-    }
-}
-
-mod serde_arc {
-    use serde::{
-        Deserialize, Deserializer, Serialize, Serializer,
-    };
-    use std::sync::Arc;
-
-    pub fn serialize<S, T>(val: &Arc<T>, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-        T: Serialize,
-    {
-        T::serialize(&*val, s)
-    }
-
-    pub fn deserialize<'de, D, T>(d: D) -> Result<Arc<T>, D::Error>
-    where
-        D: Deserializer<'de>,
-        T: Deserialize<'de>,
-    {
-        Ok(Arc::new(T::deserialize(d)?))
     }
 }

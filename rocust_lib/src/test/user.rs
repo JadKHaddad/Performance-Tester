@@ -1,9 +1,13 @@
-use crate::{EndPoint, LogType, Logger, Method, Results, SerDeserEndpoint, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Method, Results, Status, Updatble};
 use parking_lot::RwLock;
 use rand::Rng;
 use reqwest::Client;
 use reqwest::RequestBuilder;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{MapAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -19,37 +23,6 @@ pub enum UserBehaviour {
     AGGRESSIVE,
     PASSIVE,
     LAZY,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SerDeserUser {
-    pub status: Status,
-    pub id: String,
-    pub sleep: (u64, u64),
-    pub host: String,
-    pub endpoints: Vec<SerDeserEndpoint>,
-    pub global_endpoints: Vec<SerDeserEndpoint>,
-    pub global_headers: Option<HashMap<String, String>>,
-}
-
-impl SerDeserUser {
-    // TODO
-    pub fn into_user(self, global_results: Arc<RwLock<Results>>, logger: Arc<Logger>) -> User {
-        User::new(
-            self.id,
-            self.sleep,
-            Arc::new(self.host),
-            Arc::new(
-                self.global_endpoints
-                    .into_iter()
-                    .map(|e| e.into_endpoint())
-                    .collect(),
-            ),
-            self.global_headers,
-            global_results,
-            logger,
-        )
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -283,10 +256,6 @@ impl User {
             .add_response_time(response_time);
         self.add_response_time(response_time);
     }
-
-    pub fn into_serdeseruser(self) -> SerDeserUser {
-        todo!()
-    }
 }
 
 impl Drop for User {
@@ -335,5 +304,182 @@ impl Updatble for User {
 
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
+    }
+}
+
+impl Serialize for User {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 10 is the number of fields in the struct.
+        let mut state = serializer.serialize_struct("User", 10)?;
+        state.serialize_field("status", &*self.status.read())?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("sleep", &self.sleep)?;
+        state.serialize_field("host", &*self.host)?;
+        state.serialize_field("global_endpoints", &*self.global_endpoints)?;
+        state.serialize_field("global_headers", &self.global_headers)?;
+        state.serialize_field("global_results", &*self.global_results.read())?;
+        state.serialize_field("results", &*self.results.read())?;
+        state.serialize_field("endpoints", &*self.endpoints.read())?;
+        state.serialize_field("logger", &*self.logger)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for User {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct UserVisitor;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Status,
+            Id,
+            Sleep,
+            Host,
+            GlobalEndpoints,
+            GlobalHeaders,
+            GlobalResults,
+            Results,
+            Endpoints,
+            Logger,
+        }
+        impl<'de> Visitor<'de> for UserVisitor {
+            type Value = User;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct User")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<User, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut status: Option<Status> = None;
+                let mut id: Option<String> = None;
+                let mut sleep: Option<(u64, u64)> = None;
+                let mut host: Option<String> = None;
+                let mut global_endpoints: Option<Vec<EndPoint>> = None;
+                let mut global_headers: Option<Option<HashMap<String, String>>> = None;
+                let mut global_results: Option<Results> = None;
+                let mut results: Option<Results> = None;
+                let mut endpoints: Option<HashMap<String, Results>> = None;
+                let mut logger: Option<Logger> = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Status => {
+                            if status.is_some() {
+                                return Err(serde::de::Error::duplicate_field("status"));
+                            }
+                            status = Some(map.next_value()?);
+                        }
+                        Field::Id => {
+                            if id.is_some() {
+                                return Err(serde::de::Error::duplicate_field("id"));
+                            }
+                            id = Some(map.next_value()?);
+                        }
+                        Field::Sleep => {
+                            if sleep.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sleep"));
+                            }
+                            sleep = Some(map.next_value()?);
+                        }
+                        Field::Host => {
+                            if host.is_some() {
+                                return Err(serde::de::Error::duplicate_field("host"));
+                            }
+                            host = Some(map.next_value()?);
+                        }
+                        Field::GlobalEndpoints => {
+                            if global_endpoints.is_some() {
+                                return Err(serde::de::Error::duplicate_field("global_endpoints"));
+                            }
+                            global_endpoints = Some(map.next_value()?);
+                        }
+                        Field::GlobalHeaders => {
+                            if global_headers.is_some() {
+                                return Err(serde::de::Error::duplicate_field("global_headers"));
+                            }
+                            global_headers = Some(map.next_value()?);
+                        }
+                        Field::GlobalResults => {
+                            if global_results.is_some() {
+                                return Err(serde::de::Error::duplicate_field("global_results"));
+                            }
+                            global_results = Some(map.next_value()?);
+                        }
+                        Field::Results => {
+                            if results.is_some() {
+                                return Err(serde::de::Error::duplicate_field("results"));
+                            }
+                            results = Some(map.next_value()?);
+                        }
+                        Field::Endpoints => {
+                            if endpoints.is_some() {
+                                return Err(serde::de::Error::duplicate_field("endpoints"));
+                            }
+                            endpoints = Some(map.next_value()?);
+                        }
+                        Field::Logger => {
+                            if logger.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logger"));
+                            }
+                            logger = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let status = status.ok_or_else(|| serde::de::Error::missing_field("status"))?;
+                let id = id.ok_or_else(|| serde::de::Error::missing_field("id"))?;
+                let sleep = sleep.ok_or_else(|| serde::de::Error::missing_field("sleep"))?;
+                let host = host.ok_or_else(|| serde::de::Error::missing_field("host"))?;
+                let global_endpoints = global_endpoints
+                    .ok_or_else(|| serde::de::Error::missing_field("global_endpoints"))?;
+                let global_headers = global_headers
+                    .ok_or_else(|| serde::de::Error::missing_field("global_headers"))?;
+                let global_results = global_results
+                    .ok_or_else(|| serde::de::Error::missing_field("global_results"))?;
+                let results = results.ok_or_else(|| serde::de::Error::missing_field("results"))?;
+                let endpoints =
+                    endpoints.ok_or_else(|| serde::de::Error::missing_field("endpoints"))?;
+                let logger = logger.ok_or_else(|| serde::de::Error::missing_field("logger"))?;
+
+                Ok(User {
+                    client: Client::new(),
+                    token: Arc::new(Mutex::new(CancellationToken::new())),
+                    status: Arc::new(RwLock::new(status)),
+                    id,
+                    sleep,
+                    host: Arc::new(host),
+                    global_endpoints: Arc::new(global_endpoints),
+                    global_headers,
+                    global_results: Arc::new(RwLock::new(global_results)),
+                    results: Arc::new(RwLock::new(results)),
+                    endpoints: Arc::new(RwLock::new(endpoints)),
+                    logger: Arc::new(logger),
+                })
+            }
+        }
+        const FIELDS: &'static [&'static str] = &[
+            "status",
+            "id",
+            "sleep",
+            "host",
+            "global_endpoints",
+            "global_headers",
+            "global_results",
+            "results",
+            "endpoints",
+            "logger",
+        ];
+
+        deserializer.deserialize_struct("User", &FIELDS, UserVisitor)
     }
 }

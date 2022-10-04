@@ -1,9 +1,9 @@
-use rocust_lib::{test::Test, EndPoint, master::Master, worker::Worker};
-use std::time::Duration;
+use rocust_lib::{test::Test, EndPoint, master::Master, worker::Worker, test::user::User};
+use std::{time::Duration, process::exit};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
 async fn main() {
-   
+    std::env::set_var("RUST_BACKTRACE", "1");
 
 
 
@@ -24,14 +24,15 @@ async fn main() {
         format!("log/{}.log", "test1"),
     );
 
-    let master = Master::new(2, test.clone(), [127,0,0,1], 8080);
-    let worker = Worker::new(None, [127,0,0,1], 8080);
 
-    tokio::spawn(async move {
-        master.run_forever().await;
-    });
+    //let master = Master::new(2, test.clone(), [127,0,0,1], 8080);
+    //let worker = Worker::new(None, [127,0,0,1], 8080);
 
-    worker.connect().unwrap();
+    // tokio::spawn(async move {
+    //     master.run_forever().await;
+    // });
+
+    // worker.connect().unwrap();
     //tokio::time::sleep(Duration::from_secs(60)).await;
 
     
@@ -79,6 +80,8 @@ async fn main() {
 
     test.run().await;
 
+
+
     println!("\n{}", test);
     // println!();
     // let endpoints = test.get_endpoints();
@@ -95,4 +98,12 @@ async fn main() {
         // }
         println!("------------------------------");
     }
+
+    
+    println!("before: {:?}", test);
+    let j =  serde_json::to_string(&test).unwrap();
+    let u: Test = serde_json::from_str(&j).unwrap();
+    println!("############################################################");
+    println!("after: {:?}", u);
+    exit(0);
 }

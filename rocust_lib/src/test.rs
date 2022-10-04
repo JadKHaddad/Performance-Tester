@@ -1,8 +1,12 @@
-use crate::{EndPoint, LogType, Logger, Results, SerDeserEndpoint, Status, Updatble, serde_rw_lock, serde_arc, serde_mutex_cancalation_token};
+use crate::{EndPoint, LogType, Logger, Results, Status, Updatble};
 use parking_lot::RwLock;
 use prettytable::row;
 use prettytable::Table;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{MapAccess, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
@@ -11,83 +15,24 @@ use std::time::Instant;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
-
-use user::{SerDeserUser, User};
+use user::User;
 pub mod user;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SerDeserTest {
-    pub id: String,
-    pub status: Status,
-    //background token
-    pub user_count: u32,
-    pub run_time: Option<u64>,
-    pub sleep: (u64, u64),
-    pub host: String,
-    pub endpoints: Vec<SerDeserEndpoint>,
-    pub global_headers: Option<HashMap<String, String>>,
-    pub results: Results,
-    pub start_timestamp: Option<u64>, // TODO
-    pub end_timestamp: Option<u64>,   // TODO
-    pub users: Vec<SerDeserUser>,
-}
-
-impl SerDeserTest {
-    pub fn into_test(self, logfile_path: String) -> Test {
-        let results = Arc::new(RwLock::new(self.results));
-        let logger = Arc::new(Logger::new(logfile_path));
-        Test {
-            id: self.id,
-            status: Arc::new(RwLock::new(self.status)),
-            background_token: Arc::new(Mutex::new(CancellationToken::new())),
-            user_count: self.user_count,
-            run_time: self.run_time,
-            sleep: self.sleep,
-            host: Arc::new(self.host),
-            endpoints: Arc::new(
-                self.endpoints
-                    .into_iter()
-                    .map(|e| e.into_endpoint())
-                    .collect(),
-            ),
-            global_headers: self.global_headers,
-            results: results.clone(),
-            start_timestamp: Arc::new(RwLock::new(None)),
-            end_timestamp: Arc::new(RwLock::new(None)),
-            users: Arc::new(RwLock::new(
-                self.users
-                    .into_iter()
-                    .map(|u| u.into_user(results.clone(), logger.clone()))
-                    .collect(),
-            )),
-            logger: logger,
-        }
-    }
-}
-#[derive(Clone, Debug/* , Deserialize, Serialize*/)]
+#[derive(Clone, Debug)]
 pub struct Test {
     id: String,
-    //#[serde(with = "serde_rw_lock")]
     status: Arc<RwLock<Status>>,
-    //#[serde(with = "serde_mutex_cancalation_token")]
-    background_token: Arc<Mutex<CancellationToken>>,
+    background_token: Arc<Mutex<CancellationToken>>, //
     user_count: u32,
     run_time: Option<u64>,
     sleep: (u64, u64),
-    //#[serde(with = "serde_arc")]
     host: Arc<String>,
-    //#[serde(with = "serde_arc")]
     endpoints: Arc<Vec<EndPoint>>,
     global_headers: Option<HashMap<String, String>>,
-    //#[serde(with = "serde_rw_lock")]
     results: Arc<RwLock<Results>>,
-    //#[serde(with = "serde_rw_lock")] // TODO 
-    start_timestamp: Arc<RwLock<Option<Instant>>>,
-    //#[serde(with = "serde_rw_lock")] // TODO 
-    end_timestamp: Arc<RwLock<Option<Instant>>>,
-    //#[serde(with = "serde_rw_lock")]
+    start_timestamp: Arc<RwLock<Option<Instant>>>, //
+    end_timestamp: Arc<RwLock<Option<Instant>>>,   //
     users: Arc<RwLock<Vec<User>>>,
-    //#[serde(with = "serde_arc")]
     logger: Arc<Logger>,
 }
 
@@ -118,10 +63,6 @@ impl Test {
             users: Arc::new(RwLock::new(Vec::new())),
             logger: Arc::new(Logger::new(logfile_path)),
         }
-    }
-
-    pub fn into_serdesertest(self) -> SerDeserTest {
-        todo!()
     }
 
     async fn run_update_in_background(&self, thread_sleep_time: u64) {
@@ -428,5 +369,191 @@ impl Updatble for Test {
 
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
+    }
+}
+
+impl Serialize for Test {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("Test", 11)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("status", &*self.status.read())?;
+        state.serialize_field("user_count", &self.user_count)?;
+        state.serialize_field("run_time", &self.run_time)?;
+        state.serialize_field("sleep", &self.sleep)?;
+        state.serialize_field("host", &*self.host)?;
+        state.serialize_field("endpoints", &*self.endpoints)?;
+        state.serialize_field("global_headers", &self.global_headers)?;
+        state.serialize_field("results", &*self.results.read())?;
+        state.serialize_field("users", &*self.users.read())?;
+        state.serialize_field("logger", &*self.logger)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Test {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct TestVisitor;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Id,
+            Status,
+            UserCount,
+            RunTime,
+            Sleep,
+            Host,
+            Endpoints,
+            GlobalHeaders,
+            Results,
+            Users,
+            Logger,
+        }
+        impl<'de> Visitor<'de> for TestVisitor {
+            type Value = Test;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct Test")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Test, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut id: Option<String> = None;
+                let mut status: Option<Status> = None;
+                let mut user_count: Option<u32> = None;
+                let mut run_time: Option<Option<u64>> = None;
+                let mut sleep: Option<(u64, u64)> = None;
+                let mut host: Option<String> = None;
+                let mut endpoints: Option<Vec<EndPoint>> = None;
+                let mut global_headers: Option<Option<HashMap<String, String>>> = None;
+                let mut results: Option<Results> = None;
+                let mut users: Option<Vec<User>> = None;
+                let mut logger: Option<Logger> = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Id => {
+                            if id.is_some() {
+                                return Err(serde::de::Error::duplicate_field("id"));
+                            }
+                            id = Some(map.next_value()?);
+                        }
+                        Field::Status => {
+                            if status.is_some() {
+                                return Err(serde::de::Error::duplicate_field("status"));
+                            }
+                            status = Some(map.next_value()?);
+                        }
+                        Field::UserCount => {
+                            if user_count.is_some() {
+                                return Err(serde::de::Error::duplicate_field("user_count"));
+                            }
+                            user_count = Some(map.next_value()?);
+                        }
+                        Field::RunTime => {
+                            if run_time.is_some() {
+                                return Err(serde::de::Error::duplicate_field("run_time"));
+                            }
+                            run_time = Some(map.next_value()?);
+                        }
+                        Field::Sleep => {
+                            if sleep.is_some() {
+                                return Err(serde::de::Error::duplicate_field("sleep"));
+                            }
+                            sleep = Some(map.next_value()?);
+                        }
+                        Field::Host => {
+                            if host.is_some() {
+                                return Err(serde::de::Error::duplicate_field("host"));
+                            }
+                            host = Some(map.next_value()?);
+                        }
+                        Field::Endpoints => {
+                            if endpoints.is_some() {
+                                return Err(serde::de::Error::duplicate_field("endpoints"));
+                            }
+                            endpoints = Some(map.next_value()?);
+                        }
+                        Field::GlobalHeaders => {
+                            if global_headers.is_some() {
+                                return Err(serde::de::Error::duplicate_field("global_headers"));
+                            }
+                            global_headers = Some(map.next_value()?);
+                        }
+                        Field::Results => {
+                            if results.is_some() {
+                                return Err(serde::de::Error::duplicate_field("results"));
+                            }
+                            results = Some(map.next_value()?);
+                        }
+                        Field::Users => {
+                            if users.is_some() {
+                                return Err(serde::de::Error::duplicate_field("users"));
+                            }
+                            users = Some(map.next_value()?);
+                        }
+                        Field::Logger => {
+                            if logger.is_some() {
+                                return Err(serde::de::Error::duplicate_field("logger"));
+                            }
+                            logger = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let id = id.ok_or_else(|| serde::de::Error::missing_field("id"))?;
+                let status = status.ok_or_else(|| serde::de::Error::missing_field("status"))?;
+                let user_count =
+                    user_count.ok_or_else(|| serde::de::Error::missing_field("user_count"))?;
+                let run_time =
+                    run_time.ok_or_else(|| serde::de::Error::missing_field("run_time"))?;
+                let sleep = sleep.ok_or_else(|| serde::de::Error::missing_field("sleep"))?;
+                let host = host.ok_or_else(|| serde::de::Error::missing_field("host"))?;
+                let endpoints =
+                    endpoints.ok_or_else(|| serde::de::Error::missing_field("endpoints"))?;
+                let global_headers = global_headers
+                    .ok_or_else(|| serde::de::Error::missing_field("global_headers"))?;
+                let results = results.ok_or_else(|| serde::de::Error::missing_field("results"))?;
+                let users = users.ok_or_else(|| serde::de::Error::missing_field("users"))?;
+                let logger = logger.ok_or_else(|| serde::de::Error::missing_field("logger"))?;
+                Ok(Test {
+                    id,
+                    status: Arc::new(RwLock::new(status)),
+                    background_token: Arc::new(Mutex::new(CancellationToken::new())),
+                    user_count,
+                    run_time,
+                    sleep,
+                    host: Arc::new(host),
+                    endpoints: Arc::new(endpoints),
+                    global_headers,
+                    results: Arc::new(RwLock::new(results)),
+                    start_timestamp: Arc::new(RwLock::new(None)),
+                    end_timestamp: Arc::new(RwLock::new(None)),
+                    users: Arc::new(RwLock::new(users)),
+                    logger: Arc::new(logger),
+                })
+            }
+        }
+        const FIELDS: &'static [&'static str] = &[
+            "id",
+            "status",
+            "user_count",
+            "run_time",
+            "sleep",
+            "host",
+            "endpoints",
+            "global_headers",
+            "results",
+            "users",
+            "logger",
+        ];
+        deserializer.deserialize_struct("Test", &FIELDS, TestVisitor)
     }
 }
