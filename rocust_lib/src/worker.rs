@@ -20,8 +20,10 @@ impl Worker {
     }
 
     pub fn connect(&self) -> Result<(), Box<dyn Error>> {
+        println!("Connecting to master");
         let url = format!("ws://{}/ws", self.master_addr);
         let client = ClientBuilder::new(&url)?.connect_insecure()?;
+        println!("Connected to master");
 
         let (mut receiver, mut sender) = client.split()?;
 
@@ -45,6 +47,8 @@ impl Worker {
                                 WebSocketMessage::Stop => {
                                     self.stop_test();
                                     println!("Test stopped");
+                                    println!("Exiting");
+                                    break;
                                 }
                             }
                         }
@@ -89,6 +93,7 @@ impl Worker {
         if let Some(test) = guard.as_ref() {
             test.stop();
         }
+
     }
 
     pub fn run(&mut self) {

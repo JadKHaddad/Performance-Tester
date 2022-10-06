@@ -1,11 +1,9 @@
-use rocust_lib::{test::Test, EndPoint, master::Master, worker::Worker, test::user::User};
-use std::{time::Duration, process::exit};
+use rocust_lib::{master::Master, test::user::User, test::Test, worker::Worker, EndPoint};
+use std::{process::exit, time::Duration};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
 async fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-
-
 
     let mut test = Test::new(
         String::from("test1"),
@@ -14,9 +12,17 @@ async fn main() {
         (1, 10),
         "https://google.com".to_string(),
         vec![
-            EndPoint::new_get("/".to_string(), None, Some(vec![(String::from("id"), String::from("6"))])),
+            EndPoint::new_get(
+                "/".to_string(),
+                None,
+                Some(vec![(String::from("id"), String::from("6"))]),
+            ),
             EndPoint::new_get("/get".to_string(), None, None),
-            EndPoint::new_post("/post".to_string(), None, Some(String::from("this is body"))),
+            EndPoint::new_post(
+                "/post".to_string(),
+                None,
+                Some(String::from("this is body")),
+            ),
             EndPoint::new_put("/put".to_string(), None, None),
             EndPoint::new_delete("/delete".to_string(), None),
         ],
@@ -24,18 +30,45 @@ async fn main() {
         format!("log/{}.log", "test1"),
     );
 
-
-    let master = Master::new(2, test.clone(), String::from("127.0.0.1:3000"));
+    let master = Master::new(1, test.clone(), String::from("127.0.0.1:3000"));
     let worker = Worker::new(String::from("127.0.0.1:3000"));
+    let worker2 = Worker::new(String::from("127.0.0.1:3000"));
+    let master_c = master.clone();
+
 
     tokio::spawn(async move {
-        let _ = master.run_forever().await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        println!("Master stoppi8ng");
+        let _ = master_c.stop();
     });
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    worker.connect().unwrap();
-    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    tokio::spawn(async move {
+        let _ = master.run().await;
+        println!("Master finished");
+    });
+
 
     
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        worker2.connect().unwrap();
+        println!("worker2 finished");
+    });
+
+    // tokio::time::sleep(Duration::from_secs(3)).await;
+    //     println!("Worker spawning");
+    //     match worker.connect() {
+    //         Ok(_) => {
+    //             println!("Worker connected");
+    //         }
+    //         Err(e) => {
+    //             println!("Error connecting worker: {}", e);
+    //             exit(1);
+    //         }
+    //     }
+    //     println!("worker1 finished");
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
     // let test_handler = test.clone();
     // tokio::spawn(async move {
     //     println!("canceling user 1 in 50 seconds");
@@ -80,8 +113,6 @@ async fn main() {
 
     test.run().await;
 
-
-
     println!("\n{}", test);
     // println!();
     // let endpoints = test.get_endpoints();
@@ -99,9 +130,8 @@ async fn main() {
         println!("------------------------------");
     }
 
-    
     println!("before: {:?}", test);
-    let j =  serde_json::to_string(&test).unwrap();
+    let j = serde_json::to_string(&test).unwrap();
     let u: Test = serde_json::from_str(&j).unwrap();
     println!("############################################################");
     println!("after: {:?}", u);

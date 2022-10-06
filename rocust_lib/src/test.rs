@@ -214,6 +214,7 @@ impl Test {
     }
 
     pub fn stop(&self) {
+        println!("Stopping test ------------------------------"); //TODO: remove
         self.set_status(Status::STOPPED);
         for user in self.users.read().iter() {
             user.stop();
