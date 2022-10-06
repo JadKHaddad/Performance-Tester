@@ -321,6 +321,10 @@ impl Test {
     pub fn get_id(&self) -> &String {
         &self.id
     }
+
+    pub fn set_logger(&mut self, logger: Logger) {
+        self.logger = Arc::new(logger);
+    }
 }
 
 impl fmt::Display for Test {
@@ -581,3 +585,77 @@ impl<'de> Deserialize<'de> for Test {
         deserializer.deserialize_struct("Test", &FIELDS, TestVisitor)
     }
 }
+
+//might need
+/*
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestInfo {
+    pub id: String,
+    pub user_count: u32,
+    pub run_time: Option<u64>,
+    pub sleep: (u64, u64),
+    pub host: String,
+    pub endpoints: Vec<EndPoint>,
+    pub global_headers: Option<HashMap<String, String>>,
+    pub logfile_path: String,
+}
+
+impl TestInfo {
+    pub fn new(
+        id: String,
+        user_count: u32,
+        run_time: Option<u64>,
+        sleep: (u64, u64),
+        host: String,
+        endpoints: Vec<EndPoint>,
+        global_headers: Option<HashMap<String, String>>,
+        logfile_path: String,
+    ) -> TestInfo {
+        TestInfo {
+            id,
+            user_count,
+            run_time,
+            sleep,
+            host,
+            endpoints,
+            global_headers,
+            logfile_path
+        }
+    }
+
+    pub fn into_test(self) -> Test {
+        Test::new(
+            self.id,
+            self.user_count,
+            self.run_time,
+            self.sleep,
+            self.host,
+            self.endpoints,
+            self.global_headers,
+            self.logfile_path,
+        )
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, Box<dyn Error>> { // TODO repeated code // use a macro
+        let test: Self =  serde_json::from_str(json)?;
+        Ok(test)
+    }
+
+    pub async fn from_file(path: &str) -> Result<Self, Box<dyn Error>> { // TODO repeated code // use a macro
+        let json = fs::read_to_string(path).await?;
+        let test: Self = Self::from_json(&json)?;
+        Ok(test)
+    }
+
+    pub fn into_json(&self) -> Result<String, Box<dyn Error>> { // TODO repeated code // use a macro
+        let json = serde_json::to_string(self)?;
+        Ok(json)
+    }
+
+    pub async fn into_file(&self, path: &str) -> Result<(), Box<dyn Error>> { // TODO repeated code // use a macro
+        let json = self.into_json()?;
+        fs::write(path, json).await?;
+        Ok(())
+    }
+}
+*/

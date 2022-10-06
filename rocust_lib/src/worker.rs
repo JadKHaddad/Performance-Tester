@@ -7,28 +7,20 @@ use websocket::{Message, OwnedMessage};
 
 pub struct Worker {
     test: Option<Test>,
-    host: [u8; 4],
-    port: u16,
+    master_addr: String,
     //client: Option<websocket::sync::Client<std::net::TcpStream>>,
 }
 
 impl Worker {
-    pub fn new(test: Option<Test>, host: [u8; 4], port: u16) -> Worker {
-        Worker { test, host, port }
+    pub fn new(master_addr: String) -> Worker {
+        Worker { test: None, master_addr }
     }
 
-    fn create_host_string_from_host_ip(&self) -> String {
-        format!(
-            "{}.{}.{}.{}",
-            self.host[0], self.host[1], self.host[2], self.host[3]
-        )
-    }
 
     pub fn connect(&self) -> Result<(), Box<dyn Error>> {
         let url = format!(
-            "ws://{}:{}/ws",
-            self.create_host_string_from_host_ip(),
-            self.port
+            "ws://{}/ws",
+            self.master_addr
         );
         let client = ClientBuilder::new(&url)?.connect_insecure()?;
 
