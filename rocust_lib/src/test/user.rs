@@ -34,7 +34,7 @@ pub struct User {
     sleep: (u64, u64),
     host: Arc<String>,
     global_endpoints: Arc<Vec<EndPoint>>,
-    global_headers: Option<HashMap<String, String>>,
+    global_headers: Arc<Option<HashMap<String, String>>>,
     global_results: Arc<RwLock<Results>>,
     results: Arc<RwLock<Results>>,
     endpoints: Arc<RwLock<HashMap<String, Results>>>,
@@ -59,7 +59,7 @@ impl User {
         sleep: (u64, u64),
         host: Arc<String>,
         global_endpoints: Arc<Vec<EndPoint>>,
-        global_headers: Option<HashMap<String, String>>,
+        global_headers: Arc<Option<HashMap<String, String>>>,
         global_results: Arc<RwLock<Results>>,
         logger: Arc<Logger>,
     ) -> User {
@@ -80,7 +80,7 @@ impl User {
     }
 
     fn add_headers(&self, mut request: RequestBuilder, endpoint: &EndPoint) -> RequestBuilder {
-        if let Some(global_headers) = &self.global_headers {
+        if let Some(global_headers) = &*self.global_headers {
             for (key, value) in global_headers {
                 request = request.header(key, value);
             }
@@ -319,7 +319,7 @@ impl Serialize for User {
         state.serialize_field("sleep", &self.sleep)?;
         state.serialize_field("host", &*self.host)?;
         state.serialize_field("global_endpoints", &*self.global_endpoints)?;
-        state.serialize_field("global_headers", &self.global_headers)?;
+        state.serialize_field("global_headers", &*self.global_headers)?;
         state.serialize_field("global_results", &*self.global_results.read())?;
         state.serialize_field("results", &*self.results.read())?;
         state.serialize_field("endpoints", &*self.endpoints.read())?;
@@ -459,7 +459,7 @@ impl<'de> Deserialize<'de> for User {
                     sleep,
                     host: Arc::new(host),
                     global_endpoints: Arc::new(global_endpoints),
-                    global_headers,
+                    global_headers: Arc::new(global_headers),
                     global_results: Arc::new(RwLock::new(global_results)),
                     results: Arc::new(RwLock::new(results)),
                     endpoints: Arc::new(RwLock::new(endpoints)),

@@ -30,7 +30,7 @@ pub struct Test {
     sleep: (u64, u64),
     host: Arc<String>,
     endpoints: Arc<Vec<EndPoint>>,
-    global_headers: Option<HashMap<String, String>>,
+    global_headers: Arc<Option<HashMap<String, String>>>,
     results: Arc<RwLock<Results>>,
     start_timestamp: Arc<RwLock<Option<Instant>>>, //
     end_timestamp: Arc<RwLock<Option<Instant>>>,   //
@@ -58,7 +58,7 @@ impl Test {
             sleep,
             host: Arc::new(host),
             endpoints: Arc::new(endpoints),
-            global_headers,
+            global_headers: Arc::new(global_headers),
             results: Arc::new(RwLock::new(Results::new())),
             start_timestamp: Arc::new(RwLock::new(None)),
             end_timestamp: Arc::new(RwLock::new(None)),
@@ -329,6 +329,17 @@ impl Test {
 
 impl fmt::Display for Test {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // let global_headers = if let Some(s_global_headers) = &*self.global_headers {
+        //     format!("{:?}", s_global_headers)
+        // } else {
+        //     String::from("<>")
+        // };
+        let global_headers = if self.global_headers.is_some() {
+            &*self.global_headers
+        } else {
+            &None
+        };
+    
         write!(
             f,
             "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{} - {}] | Host [{}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",
@@ -338,7 +349,7 @@ impl fmt::Display for Test {
             self.sleep.0,
             self.sleep.1,
             self.host,
-            self.global_headers.as_ref().unwrap_or(&HashMap::new()),
+            global_headers,
             self.results.read(),
             self.start_timestamp,
             self.end_timestamp,
@@ -413,7 +424,7 @@ impl Serialize for Test {
         state.serialize_field("sleep", &self.sleep)?;
         state.serialize_field("host", &*self.host)?;
         state.serialize_field("endpoints", &*self.endpoints)?;
-        state.serialize_field("global_headers", &self.global_headers)?;
+        state.serialize_field("global_headers", &*self.global_headers)?;
         state.serialize_field("results", &*self.results.read())?;
         state.serialize_field("users", &*self.users.read())?;
         state.serialize_field("logger", &*self.logger)?;
@@ -560,7 +571,7 @@ impl<'de> Deserialize<'de> for Test {
                     sleep,
                     host: Arc::new(host),
                     endpoints: Arc::new(endpoints),
-                    global_headers,
+                    global_headers: Arc::new(global_headers),
                     results: Arc::new(RwLock::new(results)),
                     start_timestamp: Arc::new(RwLock::new(None)),
                     end_timestamp: Arc::new(RwLock::new(None)),

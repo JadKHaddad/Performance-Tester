@@ -28,12 +28,12 @@ async fn main() {
     let master = Master::new(2, test.clone(), String::from("127.0.0.1:3000"));
     let worker = Worker::new(String::from("127.0.0.1:3000"));
 
-    tokio::spawn(async move {
-        let _ = master.run_forever().await;
-    });
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    worker.connect().unwrap();
-    tokio::time::sleep(Duration::from_secs(60)).await;
+    // tokio::spawn(async move {
+    //     let _ = master.run_forever().await;
+    // });
+    // tokio::time::sleep(Duration::from_secs(3)).await;
+    // worker.connect().unwrap();
+    // tokio::time::sleep(Duration::from_secs(60)).await;
 
     
     // let test_handler = test.clone();
