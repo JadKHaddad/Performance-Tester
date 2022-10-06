@@ -9,9 +9,11 @@ use serde::{
 };
 use std::collections::HashMap;
 use std::fmt;
+use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
+use tokio::fs;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
@@ -63,6 +65,28 @@ impl Test {
             users: Arc::new(RwLock::new(Vec::new())),
             logger: Arc::new(Logger::new(logfile_path)),
         }
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, Box<dyn Error>> {
+        let test: Self =  serde_json::from_str(json)?;
+        Ok(test)
+    }
+
+    pub async fn from_file(path: &str) -> Result<Self, Box<dyn Error>> {
+        let json = fs::read_to_string(path).await?;
+        let test: Self = Self::from_json(&json)?;
+        Ok(test)
+    }
+
+    pub fn into_json(&self) -> Result<String, Box<dyn Error>> {
+        let json = serde_json::to_string(self)?;
+        Ok(json)
+    }
+
+    pub async fn into_file(&self, path: &str) -> Result<(), Box<dyn Error>> {
+        let json = self.into_json()?;
+        fs::write(path, json).await?;
+        Ok(())
     }
 
     async fn run_update_in_background(&self, thread_sleep_time: u64) {
