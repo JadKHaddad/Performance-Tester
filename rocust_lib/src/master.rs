@@ -7,17 +7,15 @@ use tokio::sync::broadcast;
 
 use futures_util::{SinkExt, StreamExt};
 use poem::{
-    middleware::Tracing,
     get, handler,
     listener::TcpListener,
+    middleware::Tracing,
     web::{
         websocket::{Message, WebSocket},
-        Data, Html, Path,
+        Data
     },
     EndpointExt, IntoResponse, Route, Server,
 };
-
-
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum WebSocketMessage {
@@ -76,7 +74,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<AppState>>) -> impl IntoResponse {
         tokio::spawn(async move {
             while let Some(Ok(msg)) = stream.next().await {
                 if let Message::Text(text) = msg {
-                    if sender.send(format!("{}",text)).is_err() {
+                    if sender.send(format!("{}", text)).is_err() {
                         break;
                     }
                 }
@@ -92,6 +90,33 @@ fn ws(ws: WebSocket, state: Data<&Arc<AppState>>) -> impl IntoResponse {
                     println!("Error sending message to worker");
                     return;
                 }
+
+                // TODO remove
+                // dev
+                {
+                    let message = WebSocketMessage::Start;
+                    if let Some(json) = message.into_json() {
+                        if sink.send(Message::Text(json)).await.is_err() {
+                            println!("Error sending message to worker");
+                            return;
+                        }
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    let message = WebSocketMessage::Stop;
+                    if let Some(json) = message.into_json() {
+                        if sink.send(Message::Text(json)).await.is_err() {
+                            println!("Error sending message to worker");
+                            return;
+                        }
+                    }
+
+                    //close connection
+                    if sink.send(Message::Close(None)).await.is_err() {
+                        println!("Error sending message to worker");
+                        return;
+                    }
+                }
             }
 
             while let Ok(msg) = receiver.recv().await {
@@ -102,53 +127,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<AppState>>) -> impl IntoResponse {
         });
     })
 }
-#[handler]
-fn index() -> Html<&'static str> {
-    Html(
-        r###"
-    <body>
-        <form id="loginForm">
-            Name: <input id="nameInput" type="text" />
-            <button type="submit">Login</button>
-        </form>
-        
-        <form id="sendForm" hidden>
-            Text: <input id="msgInput" type="text" />
-            <button type="submit">Send</button>
-        </form>
-        
-        <textarea id="msgsArea" cols="50" rows="30" hidden></textarea>
-    </body>
-    <script>
-        let ws;
-        const loginForm = document.querySelector("#loginForm");
-        const sendForm = document.querySelector("#sendForm");
-        const nameInput = document.querySelector("#nameInput");
-        const msgInput = document.querySelector("#msgInput");
-        const msgsArea = document.querySelector("#msgsArea");
-        
-        nameInput.focus();
-        loginForm.addEventListener("submit", function(event) {
-            event.preventDefault();
-            loginForm.hidden = true;
-            sendForm.hidden = false;
-            msgsArea.hidden = false;
-            msgInput.focus();
-            ws = new WebSocket("ws://127.0.0.1:3000/ws");
-            ws.onmessage = function(event) {
-                msgsArea.value += event.data + "\r\n";
-            }
-        });
-        
-        sendForm.addEventListener("submit", function(event) {
-            event.preventDefault();
-            ws.send(msgInput.value);
-            msgInput.value = "";
-        });
-    </script>
-    "###,
-    )
-}
+
 impl Master {
     pub fn new(workers_count: u32, test: Test, addr: String) -> Master {
         let (tx, _rx) = broadcast::channel(100);
@@ -163,21 +142,19 @@ impl Master {
     // the master will wait for the workers to connect. then he will send them the test to run and tell each one of them how many users to run.
     // the workers will run the test and send the results back to the master.
     // the master will aggregate the results.
-    pub async fn run_forever(&self) -> Result<(), std::io::Error>  {
+    pub async fn run_forever(&self) -> Result<(), std::io::Error> {
         if std::env::var_os("RUST_LOG").is_none() {
             std::env::set_var("RUST_LOG", "poem=debug");
         }
         tracing_subscriber::fmt::init();
 
         let app = Route::new()
-        .at("/", get(index))
-        .at("/ws", get(ws.data(self.state.clone())))
-        .with(Tracing);
+            .at("/ws", get(ws.data(self.state.clone())))
+            .with(Tracing);
         println!("Running on http://{}", self.addr);
-        
+
         Server::new(TcpListener::bind(self.addr.clone()))
             .run(app)
-
             .await
     }
 
@@ -188,5 +165,4 @@ impl Master {
     pub fn stop(&mut self) {
         todo!()
     }
-
 }
