@@ -221,26 +221,34 @@ impl Test {
         }
     }
 
-    fn finish(&self) {
+    pub fn finish(&self) {
         self.set_status(Status::FINISHED);
         for user in self.users.read().iter() {
             user.finish();
         }
     }
 
-    fn set_start_timestamp(&self, start_timestamp: Instant) {
+    pub fn set_start_timestamp(&self, start_timestamp: Instant) {
         *self.start_timestamp.write() = Some(start_timestamp);
     }
 
-    fn set_end_timestamp(&self, end_timestamp: Instant) {
+    pub fn set_end_timestamp(&self, end_timestamp: Instant) {
         *self.end_timestamp.write() = Some(end_timestamp);
     }
-
+    
     fn set_status(&self, status: Status) {
         *self.status.write() = status;
     }
 
-    fn print_stats(&self) {
+    pub fn set_logger(&mut self, logger: Arc<Logger>) {
+        self.logger = logger;
+    }
+
+    pub fn set_run_time(&mut self, run_time: Option<u64>){
+        self.run_time = run_time;
+    }
+
+    pub fn print_stats(&self) {
         let mut table = Table::new();
         table.add_row(row![
             "METH",
@@ -296,7 +304,7 @@ impl Test {
         }
     }
 
-    fn calculate_elapsed_time(
+    pub fn calculate_elapsed_time(
         start_timestamp: Option<Instant>,
         end_timestamp: Option<Instant>,
     ) -> Option<Duration> {
@@ -319,12 +327,22 @@ impl Test {
         &self.status
     }
 
+    pub fn get_run_time(&self) -> &Option<u64> {
+        &self.run_time
+    }
+
     pub fn get_id(&self) -> &String {
         &self.id
     }
 
-    pub fn set_logger(&mut self, logger: Logger) {
-        self.logger = Arc::new(logger);
+
+
+    pub fn get_start_timestamp(&self) -> &Arc<RwLock<Option<Instant>>> {
+        &self.start_timestamp
+    }
+
+    pub fn get_end_timestamp(&self) -> &Arc<RwLock<Option<Instant>>> {
+        &self.end_timestamp
     }
 }
 

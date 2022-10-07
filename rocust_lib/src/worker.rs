@@ -1,4 +1,5 @@
 use crate::master::WebSocketMessage;
+use crate::{Logger, LogType};
 use crate::test::Test;
 use futures_util::{future, pin_mut, StreamExt};
 use parking_lot::RwLock;
@@ -12,14 +13,16 @@ pub struct Worker {
     test: Arc<RwLock<Option<Test>>>,
     master_addr: String,
     token: Arc<Mutex<CancellationToken>>,
+    logger: Arc<Logger>,
 }
-
+//TODO: Background thread for the logger. Status for the worker.
 impl Worker {
-    pub fn new(master_addr: String) -> Worker {
+    pub fn new(master_addr: String, logfile_path: String) -> Worker {
         Worker {
             test: Arc::new(RwLock::new(None)),
             master_addr,
             token: Arc::new(Mutex::new(CancellationToken::new())),
+            logger: Arc::new(Logger::new(logfile_path)),
         }
     }
 
@@ -57,30 +60,39 @@ impl Worker {
                         Message::Text(text) => {
                             if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
                                 match ws_message {
-                                    WebSocketMessage::Create(test, user_count) => {
+                                    WebSocketMessage::Create(mut test, user_count) => {
+                                        test.set_logger(self.logger.clone());
+                                        test.set_run_time(None);
+                                        self.logger.log_buffered(LogType::INFO, &format!("Creating Test with [{}] users", user_count));
                                         *self.test.write() = Some(test);
-                                        println!("Test created");
                                     }
 
                                     WebSocketMessage::Start => {
-                                        println!("Starting test");
+                                        self.logger.log_buffered(LogType::INFO, "Starting test");
                                         self.run_test();
                                     }
 
                                     WebSocketMessage::Stop => {
-                                        println!("Stopping test");
+                                        self.logger.log_buffered(LogType::INFO, "Stopping test");
                                         self.stop();
-                                        println!("Exiting");
+                                        self.logger.log_buffered(LogType::INFO, "Exiting");
+                                    }
+
+                                    WebSocketMessage::Finish => {
+                                        self.logger.log_buffered(LogType::INFO, "Finishing test");
+                                        self.finish();
+                                        self.logger.log_buffered(LogType::INFO, "Exiting");
                                     }
                                 }
                             } else {
-                                println!("Invalid message");
+                                self.logger.log_buffered(LogType::ERROR, "Invalid message");
                             }
                         }
                         Message::Close(_) => {
-                            println!("Stopping test");
+                            self.logger.log_buffered(LogType::INFO, "Closing connection");
+                            self.logger.log_buffered(LogType::INFO, "Stopping test");
                             self.stop();
-                            println!("Exiting");
+                            self.logger.log_buffered(LogType::INFO, "Exiting");
                         }
                         _ => {}
                     }
@@ -109,6 +121,13 @@ impl Worker {
         }
     }
 
+    pub fn finish_test(&self) {
+        let guard = self.test.read();
+        if let Some(test) = guard.as_ref() {
+            test.finish();
+        }
+    }
+
     pub async fn run(&self) {
         let token = self.token.lock().unwrap().clone();
         select! {
@@ -121,6 +140,11 @@ impl Worker {
 
     pub fn stop(&self) {
         self.stop_test();
+        self.token.lock().unwrap().cancel();
+    }
+
+    pub fn finish(&self) {
+        self.finish_test();
         self.token.lock().unwrap().cancel();
     }
 }
