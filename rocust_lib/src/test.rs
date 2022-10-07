@@ -8,8 +8,8 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::collections::HashMap;
-use std::fmt;
 use std::error::Error;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
@@ -68,7 +68,7 @@ impl Test {
     }
 
     pub fn from_json(json: &str) -> Result<Self, Box<dyn Error>> {
-        let test: Self =  serde_json::from_str(json)?;
+        let test: Self = serde_json::from_str(json)?;
         Ok(test)
     }
 
@@ -235,7 +235,7 @@ impl Test {
     pub fn set_end_timestamp(&self, end_timestamp: Instant) {
         *self.end_timestamp.write() = Some(end_timestamp);
     }
-    
+
     fn set_status(&self, status: Status) {
         *self.status.write() = status;
     }
@@ -244,7 +244,7 @@ impl Test {
         self.logger = logger;
     }
 
-    pub fn set_run_time(&mut self, run_time: Option<u64>){
+    pub fn set_run_time(&mut self, run_time: Option<u64>) {
         self.run_time = run_time;
     }
 
@@ -335,8 +335,6 @@ impl Test {
         &self.id
     }
 
-
-
     pub fn get_start_timestamp(&self) -> &Arc<RwLock<Option<Instant>>> {
         &self.start_timestamp
     }
@@ -358,7 +356,7 @@ impl fmt::Display for Test {
         } else {
             &None
         };
-    
+
         write!(
             f,
             "Status [{}] | Users [{}] | RunTime [{}] | Sleep [{} - {}] | Host [{}] | GlobalHeaders [{:?}] | Results [{}] | StartTimestamp [{:?}] | EndTimestamp [{:?}] | ElapsedTime [{:?}]",

@@ -1,19 +1,23 @@
 use crate::master::WebSocketMessage;
-use crate::{Logger, LogType};
 use crate::test::Test;
+use crate::{LogType, Logger};
 use futures_util::{future, pin_mut, StreamExt};
 use parking_lot::RwLock;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::select;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone)]
 pub struct Worker {
     test: Arc<RwLock<Option<Test>>>,
     master_addr: String,
     token: Arc<Mutex<CancellationToken>>,
     logger: Arc<Logger>,
+    test_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 //TODO: Background thread for the logger. Status for the worker.
 impl Worker {
@@ -23,6 +27,7 @@ impl Worker {
             master_addr,
             token: Arc::new(Mutex::new(CancellationToken::new())),
             logger: Arc::new(Logger::new(logfile_path)),
+            test_handle: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -63,7 +68,10 @@ impl Worker {
                                     WebSocketMessage::Create(mut test, user_count) => {
                                         test.set_logger(self.logger.clone());
                                         test.set_run_time(None);
-                                        self.logger.log_buffered(LogType::INFO, &format!("Creating Test with [{}] users", user_count));
+                                        self.logger.log_buffered(
+                                            LogType::INFO,
+                                            &format!("Creating Test with [{}] users", user_count),
+                                        );
                                         *self.test.write() = Some(test);
                                     }
 
@@ -75,13 +83,11 @@ impl Worker {
                                     WebSocketMessage::Stop => {
                                         self.logger.log_buffered(LogType::INFO, "Stopping test");
                                         self.stop();
-                                        self.logger.log_buffered(LogType::INFO, "Exiting");
                                     }
 
                                     WebSocketMessage::Finish => {
                                         self.logger.log_buffered(LogType::INFO, "Finishing test");
                                         self.finish();
-                                        self.logger.log_buffered(LogType::INFO, "Exiting");
                                     }
                                 }
                             } else {
@@ -89,10 +95,10 @@ impl Worker {
                             }
                         }
                         Message::Close(_) => {
-                            self.logger.log_buffered(LogType::INFO, "Closing connection");
+                            self.logger
+                                .log_buffered(LogType::INFO, "Closing connection");
                             self.logger.log_buffered(LogType::INFO, "Stopping test");
                             self.stop();
-                            self.logger.log_buffered(LogType::INFO, "Exiting");
                         }
                         _ => {}
                     }
@@ -107,11 +113,12 @@ impl Worker {
 
     pub fn run_test(&self) {
         let test = self.test.read().clone();
-        tokio::spawn(async move {
+        let test_handle = tokio::spawn(async move {
             if let Some(mut test) = test {
                 test.run().await;
             }
         });
+        *self.test_handle.write() = Some(test_handle);
     }
 
     pub fn stop_test(&self) {
@@ -136,6 +143,23 @@ impl Worker {
             _ = self.run_forever() => {
             }
         }
+        let test_handle = self.test_handle.write().take(); // very nice from RwLock ;)
+
+        if let Some(test_handle) = test_handle {
+            self.logger
+                .log_buffered(LogType::INFO, "Waiting for test to terminate");
+            match test_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error while joining test: {}", e);
+                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                }
+            }
+        }
+        self.logger
+            .log_buffered(LogType::INFO, "Terminating... Bye!");
+        //flush buffer
+        let _ = self.logger.flush_buffer().await;
     }
 
     pub fn stop(&self) {

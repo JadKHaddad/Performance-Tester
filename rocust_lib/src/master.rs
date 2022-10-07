@@ -28,7 +28,7 @@ pub enum WebSocketMessage {
     Create(Test, u32),
     Start,
     Stop,
-    Finish
+    Finish,
 }
 
 impl WebSocketMessage {
