@@ -31,14 +31,14 @@ async fn main() {
     );
 
     let master = Master::new(1, test.clone(), String::from("127.0.0.1:3000"));
-    let worker = Worker::new(String::from("127.0.0.1:3000"));
-    let worker2 = Worker::new(String::from("127.0.0.1:3000"));
+    let worker = Worker::new(String::from("ws://127.0.0.1:3000/ws"));
+    let worker2 = Worker::new(String::from("ws://127.0.0.1:3000/ws"));
     let master_c = master.clone();
 
 
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        println!("Master stoppi8ng");
+        tokio::time::sleep(Duration::from_secs(7)).await;
+        println!("Master stopping");
         let _ = master_c.stop();
     });
 
@@ -51,8 +51,14 @@ async fn main() {
     
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        worker2.connect().unwrap();
+        let _ = worker2.run().await;
         println!("worker2 finished");
+    });
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _ = worker.run().await;
+        println!("worker1 finished");
     });
 
     // tokio::time::sleep(Duration::from_secs(3)).await;

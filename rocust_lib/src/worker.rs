@@ -1,14 +1,17 @@
 use crate::master::WebSocketMessage;
 use crate::test::Test;
+use futures_util::{future, pin_mut, StreamExt};
 use parking_lot::RwLock;
 use std::error::Error;
-use std::sync::Arc;
-use websocket::ClientBuilder;
-use websocket::OwnedMessage;
-
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::select;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_util::sync::CancellationToken;
 pub struct Worker {
     test: Arc<RwLock<Option<Test>>>,
     master_addr: String,
+    token: Arc<Mutex<CancellationToken>>,
 }
 
 impl Worker {
@@ -16,66 +19,77 @@ impl Worker {
         Worker {
             test: Arc::new(RwLock::new(None)),
             master_addr,
+            token: Arc::new(Mutex::new(CancellationToken::new())),
         }
     }
 
-    pub fn connect(&self) -> Result<(), Box<dyn Error>> {
-        println!("Connecting to master");
-        let url = format!("ws://{}/ws", self.master_addr);
-        let client = ClientBuilder::new(&url)?.connect_insecure()?;
-        println!("Connected to master");
-
-        let (mut receiver, mut sender) = client.split()?;
-
-        for message in receiver.incoming_messages() {
-            match message {
-                Ok(message) => {
-                    match message {
-                        OwnedMessage::Text(text) => {
-                            let ws_message = WebSocketMessage::from_json(&text)?;
-                            match ws_message {
-                                WebSocketMessage::Create(test, user_count) => {
-                                    *self.test.write() = Some(test);
-                                    println!("Test created");
-                                }
-
-                                WebSocketMessage::Start => {
-                                    println!("Test started");
-                                    self.run_test();
-                                }
-
-                                WebSocketMessage::Stop => {
-                                    self.stop_test();
-                                    println!("Test stopped");
-                                    println!("Exiting");
-                                    break;
-                                }
-                            }
-                        }
-                        OwnedMessage::Binary(data) => {
-                            println!("Received: {:?}", data);
-                        }
-                        OwnedMessage::Ping(data) => {
-                            println!("Received: {:?}", data);
-                        }
-                        OwnedMessage::Pong(data) => {
-                            println!("Received: {:?}", data);
-                        }
-                        OwnedMessage::Close(_) => {
-                            println!("Received: close");
-                            println!("Exiting");
-                            break;
-                        }
-                    }
-                    //println!("{:?}", message)
-                }
-                Err(e) => {
-                    println!("Error: {:?}", e);
+    pub async fn run_forever(&self) -> Result<(), Box<dyn Error>> {
+        //helper
+        async fn read_stdin(tx: futures_channel::mpsc::UnboundedSender<Message>) {
+            let mut stdin = tokio::io::stdin();
+            loop {
+                let mut buf = vec![0; 1024];
+                let n = match stdin.read(&mut buf).await {
+                    Err(_) | Ok(0) => break,
+                    Ok(n) => n,
+                };
+                buf.truncate(n);
+                if tx.unbounded_send(Message::binary(buf)).is_err() {
                     break;
                 }
             }
         }
-        println!("Bye");
+
+        let url = url::Url::parse(&self.master_addr)?;
+
+        let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
+        tokio::spawn(read_stdin(stdin_tx));
+
+        let (ws_stream, _) = connect_async(url).await?;
+        let (write, read) = ws_stream.split();
+
+        let stdin_to_ws = stdin_rx.map(Ok).forward(write);
+
+        let ws_to_stdout = {
+            read.for_each(|message| async {
+                if let Ok(msg) = message {
+                    match msg {
+                        Message::Text(text) => {
+                            if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
+                                match ws_message {
+                                    WebSocketMessage::Create(test, user_count) => {
+                                        *self.test.write() = Some(test);
+                                        println!("Test created");
+                                    }
+
+                                    WebSocketMessage::Start => {
+                                        println!("Starting test");
+                                        self.run_test();
+                                    }
+
+                                    WebSocketMessage::Stop => {
+                                        println!("Stopping test");
+                                        self.stop();
+                                        println!("Exiting");
+                                    }
+                                }
+                            } else {
+                                println!("Invalid message");
+                            }
+                        }
+                        Message::Close(_) => {
+                            println!("Stopping test");
+                            self.stop();
+                            println!("Exiting");
+                        }
+                        _ => {}
+                    }
+                }
+            })
+        };
+
+        pin_mut!(stdin_to_ws, ws_to_stdout);
+        future::select(stdin_to_ws, ws_to_stdout).await; // could totally use tokio::select!
         Ok(())
     }
 
@@ -93,14 +107,20 @@ impl Worker {
         if let Some(test) = guard.as_ref() {
             test.stop();
         }
-
     }
 
-    pub fn run(&mut self) {
-        todo!()
+    pub async fn run(&self) {
+        let token = self.token.lock().unwrap().clone();
+        select! {
+            _ = token.cancelled() => {
+            }
+            _ = self.run_forever() => {
+            }
+        }
     }
 
-    pub fn stop(&mut self) {
-        todo!()
+    pub fn stop(&self) {
+        self.stop_test();
+        self.token.lock().unwrap().cancel();
     }
 }
