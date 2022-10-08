@@ -1,19 +1,13 @@
 extern crate prettytable;
-use chrono::format::{DelayedFormat, StrftimeItems};
-use chrono::{DateTime, Utc};
+use chrono::{format::{DelayedFormat, StrftimeItems}, DateTime, Utc};
 use parking_lot::RwLock;
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use std::{collections::HashMap, error::Error, fmt, sync::Arc, time::Duration};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
 pub mod master;
 pub mod test;

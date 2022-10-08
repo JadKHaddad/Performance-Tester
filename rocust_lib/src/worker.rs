@@ -1,15 +1,9 @@
-use crate::master::WebSocketMessage;
-use crate::test::Test;
-use crate::Status;
-use crate::{LogType, Logger};
+use crate::{master::WebSocketMessage, test::Test, Status, LogType, Logger};
 use futures_channel::mpsc::UnboundedSender;
 use futures_util::{future, pin_mut, StreamExt};
 use parking_lot::RwLock;
-use std::error::Error;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::select;
-use tokio::task::JoinHandle;
+use std::{error::Error, sync::{Arc, Mutex}, time::Duration};
+use tokio::{select, task::JoinHandle};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tokio_util::sync::CancellationToken;
 

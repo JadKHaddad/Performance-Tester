@@ -1,19 +1,13 @@
 use crate::{EndPoint, LogType, Logger, Method, Results, Status, Updatble};
 use parking_lot::RwLock;
 use rand::Rng;
-use reqwest::Client;
-use reqwest::RequestBuilder;
+use reqwest::{Client,RequestBuilder};
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::collections::HashMap;
-use std::fmt;
-use std::sync::{Arc, Mutex};
-//use std::thread;
-use std::time::Duration;
-use std::time::Instant;
+use std::{collections::HashMap, fmt, sync::{Arc, Mutex}, time::{Duration, Instant}};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 

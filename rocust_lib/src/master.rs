@@ -1,15 +1,13 @@
 use crate::{test::Test, LogType, Logger, Status, Updatble};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::fmt;
-use std::sync::atomic::AtomicU32;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::time::Instant;
-use tokio::select;
-use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
+use std::{
+    error::Error,
+    fmt,
+    sync::{atomic::AtomicU32, Arc, Mutex},
+    time::{Duration, Instant},
+};
+use tokio::{select, sync::broadcast, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use futures_util::{SinkExt, StreamExt};
@@ -196,7 +194,6 @@ impl Master {
             _ = self.run_forever() => {
             }
         }
-
         self.join_handles().await;
         self.state
             .logger
@@ -300,9 +297,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                         return;
                     }
                 }
-
                 state.test.set_start_timestamp(Instant::now());
-
                 //Test will not start here, it will start in the workers
             }
             while let Some(Ok(msg)) = stream.next().await {

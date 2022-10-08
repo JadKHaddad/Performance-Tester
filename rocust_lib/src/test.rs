@@ -1,20 +1,13 @@
 use crate::{EndPoint, LogType, Logger, Results, Status, Updatble};
 use parking_lot::RwLock;
-use prettytable::row;
-use prettytable::Table;
+use prettytable::{row, Table};
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::collections::HashMap;
-use std::error::Error;
-use std::fmt;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::time::Instant;
-use tokio::fs;
-use tokio::select;
+use std::{collections::HashMap, error::Error, fmt, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use tokio::{fs, select};
 use tokio_util::sync::CancellationToken;
 
 use user::User;
