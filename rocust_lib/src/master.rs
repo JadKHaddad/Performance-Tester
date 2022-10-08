@@ -1,4 +1,4 @@
-use crate::{test::Test, LogType, Logger, Results, Status, Updatble};
+use crate::{test::Test, LogType, Logger, Status, Updatble};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -9,6 +9,7 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::select;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use futures_util::{SinkExt, StreamExt};
@@ -29,6 +30,7 @@ pub enum WebSocketMessage {
     Start,
     Stop,
     Finish,
+    Update(String), //TODO: change
 }
 
 impl WebSocketMessage {
@@ -54,6 +56,7 @@ impl fmt::Display for WebSocketMessage {
             WebSocketMessage::Start => write!(f, "Start"),
             WebSocketMessage::Stop => write!(f, "Stop"),
             WebSocketMessage::Finish => write!(f, "Finish"),
+            WebSocketMessage::Update(_) => write!(f, "Update"),
         }
     }
 }
@@ -65,6 +68,7 @@ struct State {
     test: Test,
     tx: broadcast::Sender<String>,
     logger: Logger,
+    background_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
 impl State {
@@ -102,6 +106,7 @@ impl Master {
             test,
             tx,
             logger: Logger::new(logfile_path),
+            background_join_handle: Arc::new(RwLock::new(None)),
         });
         Master {
             token: Arc::new(Mutex::new(CancellationToken::new())),
@@ -125,26 +130,21 @@ impl Master {
         self.state
             .logger
             .log_buffered(LogType::INFO, &format!("Running on http://{}", self.addr));
+        self.state
+            .logger
+            .log_buffered(LogType::INFO, "Waiting for workers to connect");
         println!("Running on http://{}", self.addr);
 
         Server::new(TcpListener::bind(self.addr.clone()))
             .run(app)
             .await
     }
-
-    pub async fn run(&self) {
-        self.set_status(Status::RUNNING);
-        //run background thread
+    fn set_up_run_message(&self) {
         let master_handle = self.clone();
-        let background_join_handle = tokio::spawn(async move {
-            master_handle.run_update_in_background(1).await;
-        });
-        //set run time
-        let master_handle = self.clone();
-        let mut run_message = String::from("Master running forever, press ctrl+c to stop");
+        let mut run_message = String::from("Test running forever, press ctrl+c to stop");
         if let Some(run_time) = master_handle.state.test.get_run_time().clone() {
-            run_message = format!("Master running for {} seconds", run_time);
-
+            //TODO: Start timer when all workers are connected
+            run_message = format!("Test running for {} seconds", run_time);
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(run_time)).await;
                 master_handle.finish();
@@ -155,6 +155,39 @@ impl Master {
             });
         }
         self.state.logger.log_buffered(LogType::INFO, &run_message);
+    }
+
+    fn setup_update_in_background(&self) {
+        //run background thread
+        let master_handle = self.clone(); // TODO in run test
+        let background_join_handle = tokio::spawn(async move {
+            master_handle.run_update_in_background(1).await;
+        });
+        *self.state.background_join_handle.write() = Some(background_join_handle);
+    }
+
+    async fn join_handles(&self) {
+        let background_join_handle = self.state.background_join_handle.write().take();
+        if let Some(background_join_handle) = background_join_handle {
+            self.state
+                .logger
+                .log_buffered(LogType::INFO, "Waiting for background thread to terminate");
+            match background_join_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error while joining background thread: {}", e);
+                    self.state
+                        .logger
+                        .log_buffered(LogType::ERROR, &format!("{}", e));
+                }
+            }
+        }
+    }
+    pub async fn run(&self) {
+        self.set_status(Status::RUNNING);
+
+        self.set_up_run_message();
+        self.setup_update_in_background();
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
@@ -163,17 +196,11 @@ impl Master {
             _ = self.run_forever() => {
             }
         }
-        match background_join_handle.await {
-            Ok(_) => {}
-            Err(e) => {
-                self.state
-                    .logger
-                    .log_buffered(LogType::ERROR, &format!("{}", e));
-            }
-        }
+
+        self.join_handles().await;
         self.state
             .logger
-            .log_buffered(LogType::INFO, &format!("Background thread stopped"));
+            .log_buffered(LogType::INFO, "Terminating... Bye!");
         //flush buffer
         let _ = self.state.logger.flush_buffer().await;
     }
@@ -273,14 +300,28 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                         return;
                     }
                 }
+
                 state.test.set_start_timestamp(Instant::now());
+
                 //Test will not start here, it will start in the workers
             }
             while let Some(Ok(msg)) = stream.next().await {
                 if let Message::Text(text) = msg {
-                    if sender.send(format!("{}", text)).is_err() {
-                        break;
+                    if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
+                        match ws_message {
+                            WebSocketMessage::Update(s) => {
+                                println!("{}", s);
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        state
+                            .logger
+                            .log_buffered(LogType::ERROR, &format!("Invalid message: {}", text));
                     }
+                    // if sender.send(format!("{}", text)).is_err() {
+                    //     break;
+                    // }
                 }
             }
             state.decrease_connected_workers();

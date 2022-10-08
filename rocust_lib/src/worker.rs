@@ -1,11 +1,13 @@
 use crate::master::WebSocketMessage;
 use crate::test::Test;
+use crate::Status;
 use crate::{LogType, Logger};
+use futures_channel::mpsc::UnboundedSender;
 use futures_util::{future, pin_mut, StreamExt};
 use parking_lot::RwLock;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::time::Duration;
 use tokio::select;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -13,52 +15,41 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub struct Worker {
+    status: Arc<RwLock<Status>>,
     test: Arc<RwLock<Option<Test>>>,
     master_addr: String,
     token: Arc<Mutex<CancellationToken>>,
     logger: Arc<Logger>,
-    test_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    test_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    background_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    tx: Arc<RwLock<Option<UnboundedSender<Message>>>>,
 }
-//TODO: Background thread for the logger. Status for the worker.
+
 impl Worker {
     pub fn new(master_addr: String, logfile_path: String) -> Worker {
         Worker {
+            status: Arc::new(RwLock::new(Status::CREATED)),
             test: Arc::new(RwLock::new(None)),
             master_addr,
             token: Arc::new(Mutex::new(CancellationToken::new())),
             logger: Arc::new(Logger::new(logfile_path)),
-            test_handle: Arc::new(RwLock::new(None)),
+            test_join_handle: Arc::new(RwLock::new(None)),
+            background_join_handle: Arc::new(RwLock::new(None)),
+            tx: Arc::new(RwLock::new(None)),
         }
     }
 
-    pub async fn run_forever(&self) -> Result<(), Box<dyn Error>> {
-        //helper
-        async fn read_stdin(tx: futures_channel::mpsc::UnboundedSender<Message>) {
-            let mut stdin = tokio::io::stdin();
-            loop {
-                let mut buf = vec![0; 1024];
-                let n = match stdin.read(&mut buf).await {
-                    Err(_) | Ok(0) => break,
-                    Ok(n) => n,
-                };
-                buf.truncate(n);
-                if tx.unbounded_send(Message::binary(buf)).is_err() {
-                    break;
-                }
-            }
-        }
-
+    pub async fn run_forever(&mut self) -> Result<(), Box<dyn Error>> {
         let url = url::Url::parse(&self.master_addr)?;
-
-        let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
-        tokio::spawn(read_stdin(stdin_tx));
-
+        let (tx, rx) = futures_channel::mpsc::unbounded();
         let (ws_stream, _) = connect_async(url).await?;
+        self.set_status(Status::CONNECTED);
+        self.logger.log_buffered(LogType::INFO, "Connected to master");
         let (write, read) = ws_stream.split();
+        self.tx = Arc::new(RwLock::new(Some(tx)));
 
-        let stdin_to_ws = stdin_rx.map(Ok).forward(write);
-
-        let ws_to_stdout = {
+        let ws_out = rx.map(Ok).forward(write);
+        let ws_in = {
             read.for_each(|message| async {
                 if let Ok(msg) = message {
                     match msg {
@@ -89,9 +80,14 @@ impl Worker {
                                         self.logger.log_buffered(LogType::INFO, "Finishing test");
                                         self.finish();
                                     }
+
+                                    _ => {}
                                 }
                             } else {
-                                self.logger.log_buffered(LogType::ERROR, "Invalid message");
+                                self.logger.log_buffered(
+                                    LogType::ERROR,
+                                    &format!("Invalid message: {}", text),
+                                );
                             }
                         }
                         Message::Close(_) => {
@@ -105,20 +101,37 @@ impl Worker {
                 }
             })
         };
-
-        pin_mut!(stdin_to_ws, ws_to_stdout);
-        future::select(stdin_to_ws, ws_to_stdout).await; // could totally use tokio::select!
+        pin_mut!(ws_out, ws_in);
+        future::select(ws_out, ws_in).await; // could totally use tokio::select!
         Ok(())
     }
 
-    pub fn run_test(&self) {
-        let test = self.test.read().clone();
-        let test_handle = tokio::spawn(async move {
-            if let Some(mut test) = test {
-                test.run().await;
-            }
+    fn set_status(&self, status: Status) {
+        *self.status.write() = status;
+    }
+
+    fn setup_update_in_background(&self) {
+        let worker_handle = self.clone();
+        let background_join_handle = tokio::spawn(async move {
+            worker_handle.run_update_in_background(1).await;
         });
-        *self.test_handle.write() = Some(test_handle);
+        *self.background_join_handle.write() = Some(background_join_handle);
+    }
+
+    fn setup_test_run(&self, mut test: Test) {
+        let test_handle = tokio::spawn(async move {
+            test.run().await;
+        });
+        *self.test_join_handle.write() = Some(test_handle);
+    }
+
+    pub fn run_test(&self) {
+        self.set_status(Status::RUNNING);
+        let test = self.test.read().clone();
+        if let Some(test) = test {
+            self.setup_update_in_background();
+            self.setup_test_run(test);
+        }
     }
 
     pub fn stop_test(&self) {
@@ -134,16 +147,21 @@ impl Worker {
             test.finish();
         }
     }
+    async fn join_handles(&self) {
+        let background_join_handle = self.background_join_handle.write().take();
+        let test_handle = self.test_join_handle.write().take(); // very nice from RwLock ;)
 
-    pub async fn run(&self) {
-        let token = self.token.lock().unwrap().clone();
-        select! {
-            _ = token.cancelled() => {
-            }
-            _ = self.run_forever() => {
+        if let Some(background_join_handle) = background_join_handle {
+            self.logger
+                .log_buffered(LogType::INFO, "Waiting for background thread to terminate");
+            match background_join_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error while joining background thread: {}", e);
+                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                }
             }
         }
-        let test_handle = self.test_handle.write().take(); // very nice from RwLock ;)
 
         if let Some(test_handle) = test_handle {
             self.logger
@@ -156,6 +174,17 @@ impl Worker {
                 }
             }
         }
+    }
+
+    pub async fn run(&mut self) {
+        let token = self.token.lock().unwrap().clone();
+        select! {
+            _ = token.cancelled() => {
+            }
+            _ = self.run_forever() => {
+            }
+        }
+        self.join_handles().await;
         self.logger
             .log_buffered(LogType::INFO, "Terminating... Bye!");
         //flush buffer
@@ -163,12 +192,40 @@ impl Worker {
     }
 
     pub fn stop(&self) {
+        self.set_status(Status::STOPPED);
         self.stop_test();
         self.token.lock().unwrap().cancel();
     }
 
     pub fn finish(&self) {
+        self.set_status(Status::FINISHED);
         self.finish_test();
         self.token.lock().unwrap().cancel();
+    }
+
+    async fn run_update_in_background(&self, thread_sleep_time: u64) {
+        let token = self.token.lock().unwrap().clone();
+        select! {
+            _ = token.cancelled() => {
+
+            }
+            _ = self.update_in_background(thread_sleep_time) => {
+
+            }
+        }
+    }
+
+    async fn update_in_background(&self, thread_sleep_time: u64) {
+        let tx = self.tx.read().clone();
+        loop {
+            if let Some(ref tx) = tx {
+                let message = WebSocketMessage::Update(String::from("test"));
+                if let Some(json) = message.into_json() {
+                    if tx.unbounded_send(Message::text(json)).is_err() {}
+                }
+            }
+            println!("Updating");
+            tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
+        }
     }
 }

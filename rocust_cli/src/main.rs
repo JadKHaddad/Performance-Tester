@@ -30,9 +30,9 @@ async fn main() {
         format!("log/{}.log", "test1"),
     );
 
-    let master = Master::new(2, test.clone(), String::from("127.0.0.1:3000"), String::from("log/master.log"));
-    let worker = Worker::new(String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker1.log"));
-    let worker2 = Worker::new(String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker2.log"));
+    let master = Master::new(1, test.clone(), String::from("127.0.0.1:3000"), String::from("log/master.log"));
+    let mut worker = Worker::new(String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker1.log"));
+    //let worker2 = Worker::new(String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker2.log"));
     let master_c = master.clone();
 
 
@@ -43,16 +43,17 @@ async fn main() {
     // });
 
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let _ = worker2.run().await;
-        println!("worker2 finished");
-    });
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(Duration::from_secs(1)).await;
+    //     let _ = worker2.run().await;
+    //     println!("worker2 finished");
+    // });
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let _ = worker.run().await;
-        println!("worker1 finished");
+        println!("worker1 finished: {:?}", worker);
+
     });
 
     // tokio::time::sleep(Duration::from_secs(3)).await;
@@ -70,7 +71,7 @@ async fn main() {
 
     let _ = master.run().await;
 
-    println!("Master finished -------------------------");
+    println!("Master finished: {:?}", master);
     //println!("{:?}", master);
     tokio::time::sleep(Duration::from_secs(60)).await;
     exit(0);
