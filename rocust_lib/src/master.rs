@@ -1,16 +1,6 @@
 use crate::{test::Test, LogType, Logger, Status, Updatble};
-use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
-use std::{
-    error::Error,
-    fmt,
-    sync::{atomic::AtomicU32, Arc, Mutex},
-    time::{Duration, Instant},
-};
-use tokio::{select, sync::broadcast, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
-
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::RwLock;
 use poem::{
     get, handler,
     listener::TcpListener,
@@ -21,6 +11,22 @@ use poem::{
     },
     EndpointExt, IntoResponse, Route, Server,
 };
+use serde::{Deserialize, Serialize};
+use std::{
+    error::Error,
+    fmt,
+    sync::{
+        atomic::{AtomicU32, Ordering::SeqCst},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+use tokio::{
+    select,
+    sync::{broadcast, mpsc},
+    task::JoinHandle,
+};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum WebSocketMessage {
@@ -58,29 +64,28 @@ impl fmt::Display for WebSocketMessage {
         }
     }
 }
+
 #[derive(Debug)]
 struct State {
     status: RwLock<Status>,
     workers_count: u32,
     connected_workers: AtomicU32,
     test: Test,
-    tx: broadcast::Sender<String>,
+    broadcast_tx: broadcast::Sender<String>,
     logger: Logger,
     background_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    mpsc_tx: mpsc::Sender<bool>,
 }
 
 impl State {
     fn increase_connected_workers(&self) {
-        self.connected_workers
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.connected_workers.fetch_add(1, SeqCst);
     }
     fn decrease_connected_workers(&self) {
-        self.connected_workers
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.connected_workers.fetch_sub(1, SeqCst);
     }
     fn get_connected_workers(&self) -> u32 {
-        self.connected_workers
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.connected_workers.load(SeqCst)
     }
     pub fn set_status(&self, status: Status) {
         *self.status.write() = status;
@@ -92,24 +97,28 @@ pub struct Master {
     token: Arc<Mutex<CancellationToken>>,
     addr: String,
     state: Arc<State>,
+    mpsc_rx: Arc<RwLock<Option<mpsc::Receiver<bool>>>>,
 }
 
 impl Master {
     pub fn new(workers_count: u32, test: Test, addr: String, logfile_path: String) -> Master {
-        let (tx, _rx) = broadcast::channel(100);
+        let (broadcast_tx, _) = broadcast::channel(100);
+        let (mpsc_tx, mpsc_rx) = mpsc::channel::<bool>(1);
         let state = Arc::new(State {
             status: RwLock::new(Status::CREATED),
             workers_count,
             connected_workers: AtomicU32::new(0),
             test,
-            tx,
+            broadcast_tx,
             logger: Logger::new(logfile_path),
             background_join_handle: Arc::new(RwLock::new(None)),
+            mpsc_tx,
         });
         Master {
             token: Arc::new(Mutex::new(CancellationToken::new())),
             addr,
             state,
+            mpsc_rx: Arc::new(RwLock::new(Some(mpsc_rx))),
         }
     }
 
@@ -137,6 +146,7 @@ impl Master {
             .run(app)
             .await
     }
+
     fn set_up_run_message(&self) {
         let master_handle = self.clone();
         let mut run_message = String::from("Test running forever, press ctrl+c to stop");
@@ -181,15 +191,27 @@ impl Master {
             }
         }
     }
+
+    fn run_background_tasks_on_test_start(&self) {
+        let master_handle = self.clone();
+        let mpsc_rx = self.mpsc_rx.write().take();
+        tokio::spawn(async move {
+            if let Some(mut mpsc_rx) = mpsc_rx {
+                while let Some(_) = mpsc_rx.recv().await {
+                    master_handle.set_up_run_message();
+                    master_handle.setup_update_in_background();
+                    break;
+                }
+            }
+        });
+    }
+
     pub async fn run(&self) {
         self.set_status(Status::RUNNING);
-
-        self.set_up_run_message();
-        self.setup_update_in_background();
+        self.run_background_tasks_on_test_start();
         let token = self.token.lock().unwrap().clone();
         select! {
             _ = token.cancelled() => {
-
             }
             _ = self.run_forever() => {
             }
@@ -208,7 +230,7 @@ impl Master {
         //on stop tell the workers to stop
         let message = WebSocketMessage::Stop;
         if let Some(json) = message.into_json() {
-            if self.state.tx.send(json).is_err() {
+            if self.state.broadcast_tx.send(json).is_err() {
                 self.state
                     .logger
                     .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
@@ -222,7 +244,7 @@ impl Master {
         //send finish message to workers
         let message = WebSocketMessage::Finish;
         if let Some(json) = message.into_json() {
-            if self.state.tx.send(json).is_err() {
+            if self.state.broadcast_tx.send(json).is_err() {
                 self.state
                     .logger
                     .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
@@ -259,7 +281,7 @@ impl Master {
                     .calculate_failed_requests_per_second(&elapsed);
             }
             //print stats
-            //self.state.test.print_stats();
+            self.state.test.print_stats();
             //log
             let _ = self.state.logger.flush_buffer().await;
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
@@ -271,7 +293,7 @@ impl Master {
 fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
     let state = state.clone();
     let state_clone = state.clone();
-    let sender = state.tx.clone();
+    let sender = state.broadcast_tx.clone();
     let mut receiver = sender.subscribe();
 
     ws.on_upgrade(move |socket| async move {
@@ -279,23 +301,27 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
         let test = state.test.clone();
         tokio::spawn(async move {
             state.increase_connected_workers();
-            state
-                .logger
-                .log_buffered(LogType::INFO, &format!("Worker connected"));
+            state.logger.log_buffered(LogType::INFO, "Worker connected");
             if state.get_connected_workers() == state.workers_count {
-                state.logger.log_buffered(
-                    LogType::INFO,
-                    &format!("All workers connected. Starting test"),
-                );
+                state
+                    .logger
+                    .log_buffered(LogType::INFO, "All workers connected. Starting test");
                 let message = WebSocketMessage::Start;
                 if let Some(json) = message.into_json() {
                     if sender.send(json).is_err() {
-                        state.logger.log_buffered(
-                            LogType::ERROR,
-                            &format!("Error sending message to worker"),
-                        );
+                        state
+                            .logger
+                            .log_buffered(LogType::ERROR, "Error sending message to worker");
                         return;
                     }
+                }
+                if state.mpsc_tx.send(true).await.is_err() {
+                    //TODO: this is critical, if it fails, the test will not start, so lets just panic
+                    state.logger.log_buffered(
+                        LogType::ERROR,
+                        "Error sending message to main thread, test will not start, exiting",
+                    );
+                    panic!("Error sending message to main thread, test will not start, exiting");
                 }
                 state.test.set_start_timestamp(Instant::now());
                 //Test will not start here, it will start in the workers
@@ -330,7 +356,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                 if sink.send(Message::Text(json)).await.is_err() {
                     state_clone
                         .logger
-                        .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
+                        .log_buffered(LogType::ERROR, "Error sending message to worker");
                     return;
                 }
             }
