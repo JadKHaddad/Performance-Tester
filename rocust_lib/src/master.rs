@@ -73,7 +73,7 @@ struct State {
     test: Test,
     broadcast_tx: broadcast::Sender<String>,
     logger: Logger,
-    background_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    background_join_handle: RwLock<Option<JoinHandle<()>>>,
     mpsc_tx: mpsc::Sender<bool>,
 }
 
@@ -111,7 +111,7 @@ impl Master {
             test,
             broadcast_tx,
             logger: Logger::new(logfile_path),
-            background_join_handle: Arc::new(RwLock::new(None)),
+            background_join_handle: RwLock::new(None),
             mpsc_tx,
         });
         Master {
