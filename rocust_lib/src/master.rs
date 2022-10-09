@@ -321,6 +321,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                         LogType::ERROR,
                         "Error sending message to main thread, test will not start, exiting",
                     );
+                    let _ = state.logger.flush_buffer().await;
                     panic!("Error sending message to main thread, test will not start, exiting");
                 }
                 state.test.set_start_timestamp(Instant::now());
