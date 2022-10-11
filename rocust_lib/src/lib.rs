@@ -1,4 +1,5 @@
 extern crate prettytable;
+use async_trait::async_trait;
 use chrono::{format::{DelayedFormat, StrftimeItems}, DateTime, Utc};
 use parking_lot::RwLock;
 use serde::{
@@ -199,10 +200,18 @@ trait Updatble {
     fn add_response_time(&self, response_time: u32);
     fn add_failed(&self);
     fn add_connection_error(&self);
-    fn set_requests_per_second(&self, requests_per_second: f64);
-    fn calculate_requests_per_second(&self, elapsed: &Duration);
-    fn calculate_failed_requests_per_second(&self, elapsed: &Duration);
+    fn set_requests_per_second(&self, requests_per_second: f64); //TODO: check
+    fn calculate_requests_per_second(&self, elapsed: &Duration); //TODO: check
+    fn calculate_failed_requests_per_second(&self, elapsed: &Duration); //TODO: check
     fn get_results(&self) -> Arc<RwLock<Results>>;
+}
+
+#[async_trait]
+trait Runnable { //TODO: impl for Test, User, Master and Worker
+    async fn run(&mut self);
+    fn stop(&mut self);
+    fn get_status(&self) -> Status;
+    fn get_id(&self) -> String;
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
