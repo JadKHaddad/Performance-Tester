@@ -3,5 +3,7 @@
 members = [
     "rocust_lib",
     "rocust_cli",
-    "rocust_web"
+    "rocust_web",
+    "rocust_frontend",
+    "rocust_desktop",
 ]

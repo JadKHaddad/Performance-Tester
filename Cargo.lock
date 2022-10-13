@@ -1044,6 +1044,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocust_desktop"
+version = "0.1.0"
+
+[[package]]
+name = "rocust_frontend"
+version = "0.1.0"
+
+[[package]]
 name = "rocust_lib"
 version = "0.1.0"
 dependencies = [
