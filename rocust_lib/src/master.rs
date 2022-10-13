@@ -1,4 +1,4 @@
-use crate::{test::Test, LogType, Logger, Runnable, Status, Updatble};
+use crate::{HasResults, LogType, Logger, Runnable, Status, Test};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;

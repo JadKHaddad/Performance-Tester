@@ -1,4 +1,4 @@
-use crate::{EndPoint, LogType, Logger, Results, Runnable, Status, Updatble};
+use crate::{EndPoint, HasResults, LogType, Logger, Results, Runnable, Status};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use prettytable::{row, Table};
@@ -378,7 +378,7 @@ impl fmt::Display for Test {
     }
 }
 
-impl Updatble for Test {
+impl HasResults for Test {
     fn add_response_time(&self, response_time: u32) {
         self.results.write().add_response_time(response_time);
     }

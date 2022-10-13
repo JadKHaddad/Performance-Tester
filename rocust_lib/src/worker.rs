@@ -1,4 +1,4 @@
-use crate::{master::WebSocketMessage, test::Test, LogType, Logger, Runnable, Status};
+use crate::{master::WebSocketMessage, LogType, Logger, Runnable, Status, Test};
 use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
 use futures_util::{future, pin_mut, StreamExt};

@@ -6,7 +6,7 @@ use poem::{
     web::{Data, Path},
     EndpointExt, Route, Server,
 };
-use rocust_lib::{EndPoint, Status, test::Test, Runnable};
+use rocust_lib::{test::Test, EndPoint, Runnable, Status};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -21,9 +21,17 @@ fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
         (3, 10),
         "https://google.com".to_string(),
         vec![
-            EndPoint::new_get("/".to_string(), None, Some(vec![(String::from("id"), String::from("6"))])),
+            EndPoint::new_get(
+                "/".to_string(),
+                None,
+                Some(vec![(String::from("id"), String::from("6"))]),
+            ),
             EndPoint::new_get("/get".to_string(), None, None),
-            EndPoint::new_post("/post".to_string(), None, Some(String::from("this is body"))),
+            EndPoint::new_post(
+                "/post".to_string(),
+                None,
+                Some(String::from("this is body")),
+            ),
             EndPoint::new_put("/put".to_string(), None, None),
             EndPoint::new_delete("/delete".to_string(), None),
         ],

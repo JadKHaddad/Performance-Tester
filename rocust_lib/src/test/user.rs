@@ -1,4 +1,4 @@
-use crate::{EndPoint, LogType, Logger, Method, Results, Runnable, Status, Updatble};
+use crate::{EndPoint, HasResults, LogType, Logger, Method, Results, Runnable, Status};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use rand::Rng;
@@ -276,7 +276,7 @@ impl Drop for User {
     }
 }
 
-impl Updatble for User {
+impl HasResults for User {
     fn add_response_time(&self, response_time: u32) {
         self.global_results.write().add_response_time(response_time);
         self.results.write().add_response_time(response_time);

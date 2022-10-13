@@ -1,4 +1,4 @@
-use rocust_lib::{master::Master, test::user::User, test::Test, worker::Worker, EndPoint, Runnable};
+use rocust_lib::{Master, test::user::User, Test, Worker, EndPoint, Runnable};
 use std::{process::exit, time::Duration};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
