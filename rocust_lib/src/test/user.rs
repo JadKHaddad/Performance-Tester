@@ -1,13 +1,19 @@
-use crate::{EndPoint, LogType, Logger, Method, Results, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Method, Results, Runnable, Status, Updatble};
+use async_trait::async_trait;
 use parking_lot::RwLock;
 use rand::Rng;
-use reqwest::{Client,RequestBuilder};
+use reqwest::{Client, RequestBuilder};
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{collections::HashMap, fmt, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    fmt,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
@@ -85,19 +91,6 @@ impl User {
             }
         }
         request
-    }
-
-    pub async fn run(&mut self) {
-        let token = self.token.lock().unwrap().clone();
-        select! {
-            _ = token.cancelled() => {
-
-            }
-            _ = self.run_forever() => {
-            }
-        }
-        self.logger
-            .log_buffered(LogType::INFO, &format!("User [{}] stopped", self.id));
     }
 
     async fn run_forever(&mut self) {
@@ -186,22 +179,6 @@ impl User {
         }
     }
 
-    pub fn stop(&self) {
-        self.token.lock().unwrap().cancel();
-        self.set_status(Status::STOPPED);
-    }
-
-    pub fn finish(&self) {
-        self.token.lock().unwrap().cancel();
-        let current_status = self.status.read().clone();
-        match current_status {
-            Status::STOPPED => {}
-            _ => {
-                self.set_status(Status::FINISHED);
-            }
-        }
-    }
-
     fn set_status(&self, status: Status) {
         *self.status.write() = status;
     }
@@ -252,9 +229,50 @@ impl User {
     }
 }
 
+#[async_trait]
+impl Runnable for User {
+    async fn run(&mut self) {
+        let token = self.token.lock().unwrap().clone();
+        select! {
+            _ = token.cancelled() => {
+
+            }
+            _ = self.run_forever() => {
+            }
+        }
+        self.logger
+            .log_buffered(LogType::INFO, &format!("User [{}] stopped", self.id));
+    }
+
+    fn stop(&self) {
+        self.token.lock().unwrap().cancel();
+        self.set_status(Status::STOPPED);
+    }
+
+    fn finish(&self) {
+        self.token.lock().unwrap().cancel();
+        let current_status = self.status.read().clone();
+        match current_status {
+            Status::STOPPED => {}
+            _ => {
+                self.set_status(Status::FINISHED);
+            }
+        }
+    }
+
+    fn get_status(&self) -> Status {
+        let status = &*self.status.read();
+        status.clone()
+    }
+
+    fn get_id(&self) -> &String {
+        &self.id
+    }
+}
+
 impl Drop for User {
     fn drop(&mut self) {
-        self.token.lock().unwrap().cancel(); //stop main thread
+        self.token.lock().unwrap().cancel(); //stop main thread. TODO: if user is cloned, this will stop the other thread too
     }
 }
 

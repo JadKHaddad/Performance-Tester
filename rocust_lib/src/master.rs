@@ -1,4 +1,5 @@
-use crate::{test::Test, LogType, Logger, Status, Updatble};
+use crate::{test::Test, LogType, Logger, Runnable, Status, Updatble};
+use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
 use poem::{
@@ -94,6 +95,7 @@ impl State {
 
 #[derive(Debug, Clone)]
 pub struct Master {
+    id: String,
     token: Arc<Mutex<CancellationToken>>,
     addr: String,
     state: Arc<State>,
@@ -101,7 +103,13 @@ pub struct Master {
 }
 
 impl Master {
-    pub fn new(workers_count: u32, test: Test, addr: String, logfile_path: String) -> Master {
+    pub fn new(
+        id: String,
+        workers_count: u32,
+        test: Test,
+        addr: String,
+        logfile_path: String,
+    ) -> Master {
         let (broadcast_tx, _) = broadcast::channel(100);
         let (mpsc_tx, mpsc_rx) = mpsc::channel::<bool>(1);
         let state = Arc::new(State {
@@ -115,6 +123,7 @@ impl Master {
             mpsc_tx,
         });
         Master {
+            id,
             token: Arc::new(Mutex::new(CancellationToken::new())),
             addr,
             state,
@@ -206,52 +215,6 @@ impl Master {
         });
     }
 
-    pub async fn run(&self) {
-        self.set_status(Status::RUNNING);
-        self.run_background_tasks_on_test_start();
-        let token = self.token.lock().unwrap().clone();
-        select! {
-            _ = token.cancelled() => {
-            }
-            _ = self.run_forever() => {
-            }
-        }
-        self.join_handles().await;
-        self.state
-            .logger
-            .log_buffered(LogType::INFO, "Terminating... Bye!");
-        //flush buffer
-        let _ = self.state.logger.flush_buffer().await;
-    }
-
-    pub fn stop(&self) {
-        self.set_status(Status::STOPPED);
-        self.token.lock().unwrap().cancel();
-        //on stop tell the workers to stop
-        let message = WebSocketMessage::Stop;
-        if let Some(json) = message.into_json() {
-            if self.state.broadcast_tx.send(json).is_err() {
-                self.state
-                    .logger
-                    .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
-            }
-        }
-    }
-
-    fn finish(&self) {
-        self.set_status(Status::FINISHED);
-        self.token.lock().unwrap().cancel();
-        //send finish message to workers
-        let message = WebSocketMessage::Finish;
-        if let Some(json) = message.into_json() {
-            if self.state.broadcast_tx.send(json).is_err() {
-                self.state
-                    .logger
-                    .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
-            }
-        }
-    }
-
     fn set_status(&self, status: Status) {
         self.state.set_status(status);
     }
@@ -286,6 +249,64 @@ impl Master {
             let _ = self.state.logger.flush_buffer().await;
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
+    }
+}
+
+#[async_trait]
+impl Runnable for Master {
+    async fn run(&mut self) {
+        self.set_status(Status::RUNNING);
+        self.run_background_tasks_on_test_start();
+        let token = self.token.lock().unwrap().clone();
+        select! {
+            _ = token.cancelled() => {
+            }
+            _ = self.run_forever() => {
+            }
+        }
+        self.join_handles().await;
+        self.state
+            .logger
+            .log_buffered(LogType::INFO, "Terminating... Bye!");
+        //flush buffer
+        let _ = self.state.logger.flush_buffer().await;
+    }
+
+    fn stop(&self) {
+        self.set_status(Status::STOPPED);
+        self.token.lock().unwrap().cancel();
+        //on stop tell the workers to stop
+        let message = WebSocketMessage::Stop;
+        if let Some(json) = message.into_json() {
+            if self.state.broadcast_tx.send(json).is_err() {
+                self.state
+                    .logger
+                    .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
+            }
+        }
+    }
+
+    fn finish(&self) {
+        self.set_status(Status::FINISHED);
+        self.token.lock().unwrap().cancel();
+        //send finish message to workers
+        let message = WebSocketMessage::Finish;
+        if let Some(json) = message.into_json() {
+            if self.state.broadcast_tx.send(json).is_err() {
+                self.state
+                    .logger
+                    .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
+            }
+        }
+    }
+
+    fn get_status(&self) -> Status {
+        let status = &*self.state.status.read();
+        status.clone()
+    }
+
+    fn get_id(&self) -> &String {
+        &self.id
     }
 }
 

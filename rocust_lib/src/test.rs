@@ -1,4 +1,5 @@
-use crate::{EndPoint, LogType, Logger, Results, Status, Updatble};
+use crate::{EndPoint, LogType, Logger, Results, Runnable, Status, Updatble};
+use async_trait::async_trait;
 use parking_lot::RwLock;
 use prettytable::{row, Table};
 use serde::{
@@ -6,7 +7,13 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{collections::HashMap, error::Error, fmt, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio::{fs, select};
 use tokio_util::sync::CancellationToken;
 
@@ -112,67 +119,6 @@ impl Test {
         }
     }
 
-    pub async fn run(&mut self) {
-        self.set_start_timestamp(Instant::now());
-        self.set_status(Status::RUNNING);
-        //run background thread
-        let test_handle = self.clone();
-        let background_join_handle = tokio::spawn(async move {
-            test_handle.run_update_in_background(1).await;
-        });
-        //set run time
-        let mut run_message = String::from("Test running forever, press ctrl+c to stop");
-        if let Some(run_time) = self.run_time {
-            run_message = format!("Test running for {} seconds", run_time);
-            let test_handle = self.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(run_time)).await;
-                test_handle.finish();
-                test_handle
-                    .logger
-                    .log_buffered(LogType::INFO, &format!("Test finished"));
-            });
-        }
-        self.logger.log_buffered(LogType::INFO, &run_message);
-        let mut user_join_handles = vec![];
-        for i in 0..self.user_count {
-            let user_id = i;
-            self.logger
-                .log_buffered(LogType::INFO, &format!("Spawning user: [{}]", user_id));
-            let mut user = self.create_user(user_id.to_string());
-            let user_join_handle = tokio::spawn(async move {
-                user.run().await;
-            });
-            user_join_handles.push(user_join_handle);
-        }
-        self.logger
-            .log_buffered(LogType::INFO, &format!("All users have been spawned"));
-        for join_handle in user_join_handles {
-            match join_handle.await {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("Error while joining user: {}", e);
-                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
-                }
-            }
-        }
-        self.set_end_timestamp(Instant::now());
-        self.logger
-            .log_buffered(LogType::INFO, &format!("All users have been stopped"));
-        //stop background thread
-        self.background_token.lock().unwrap().cancel();
-        match background_join_handle.await {
-            Ok(_) => {}
-            Err(e) => {
-                self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
-            }
-        }
-        self.logger
-            .log_buffered(LogType::INFO, &format!("Background thread stopped"));
-        //flush buffer
-        let _ = self.logger.flush_buffer().await;
-    }
-
     pub fn create_user(&self, id: String) -> User {
         let user = User::new(
             id,
@@ -203,21 +149,6 @@ impl Test {
                 );
                 Err(String::from("User not found"))
             }
-        }
-    }
-
-    pub fn stop(&self) {
-        println!("Stopping test ------------------------------"); //TODO: remove
-        self.set_status(Status::STOPPED);
-        for user in self.users.read().iter() {
-            user.stop();
-        }
-    }
-
-    pub fn finish(&self) {
-        self.set_status(Status::FINISHED);
-        for user in self.users.read().iter() {
-            user.finish();
         }
     }
 
@@ -316,16 +247,8 @@ impl Test {
         &self.endpoints
     }
 
-    pub fn get_status(&self) -> &Arc<RwLock<Status>> {
-        &self.status
-    }
-
     pub fn get_run_time(&self) -> &Option<u64> {
         &self.run_time
-    }
-
-    pub fn get_id(&self) -> &String {
-        &self.id
     }
 
     pub fn get_start_timestamp(&self) -> &Arc<RwLock<Option<Instant>>> {
@@ -334,6 +257,93 @@ impl Test {
 
     pub fn get_end_timestamp(&self) -> &Arc<RwLock<Option<Instant>>> {
         &self.end_timestamp
+    }
+}
+
+#[async_trait]
+impl Runnable for Test {
+    async fn run(&mut self) {
+        self.set_start_timestamp(Instant::now());
+        self.set_status(Status::RUNNING);
+        //run background thread
+        let test_handle = self.clone();
+        let background_join_handle = tokio::spawn(async move {
+            test_handle.run_update_in_background(1).await;
+        });
+        //set run time
+        let mut run_message = String::from("Test running forever, press ctrl+c to stop");
+        if let Some(run_time) = self.run_time {
+            run_message = format!("Test running for {} seconds", run_time);
+            let test_handle = self.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(run_time)).await;
+                test_handle.finish();
+                test_handle
+                    .logger
+                    .log_buffered(LogType::INFO, &format!("Test finished"));
+            });
+        }
+        self.logger.log_buffered(LogType::INFO, &run_message);
+        let mut user_join_handles = vec![];
+        for i in 0..self.user_count {
+            let user_id = i;
+            self.logger
+                .log_buffered(LogType::INFO, &format!("Spawning user: [{}]", user_id));
+            let mut user = self.create_user(user_id.to_string());
+            let user_join_handle = tokio::spawn(async move {
+                user.run().await;
+            });
+            user_join_handles.push(user_join_handle);
+        }
+        self.logger
+            .log_buffered(LogType::INFO, &format!("All users have been spawned"));
+        for join_handle in user_join_handles {
+            match join_handle.await {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("Error while joining user: {}", e);
+                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                }
+            }
+        }
+        self.set_end_timestamp(Instant::now());
+        self.logger
+            .log_buffered(LogType::INFO, &format!("All users have been stopped"));
+        //stop background thread
+        self.background_token.lock().unwrap().cancel();
+        match background_join_handle.await {
+            Ok(_) => {}
+            Err(e) => {
+                self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+            }
+        }
+        self.logger
+            .log_buffered(LogType::INFO, &format!("Background thread stopped"));
+        //flush buffer
+        let _ = self.logger.flush_buffer().await;
+    }
+
+    fn stop(&self) {
+        self.set_status(Status::STOPPED);
+        for user in self.users.read().iter() {
+            user.stop();
+        }
+    }
+
+    fn finish(&self) {
+        self.set_status(Status::FINISHED);
+        for user in self.users.read().iter() {
+            user.finish();
+        }
+    }
+
+    fn get_status(&self) -> Status {
+        let status = &*self.status.read();
+        status.clone()
+    }
+
+    fn get_id(&self) -> &String {
+        &self.id
     }
 }
 
@@ -365,13 +375,6 @@ impl fmt::Display for Test {
             self.end_timestamp,
             self.get_elapsed_time()
         )
-    }
-}
-
-impl Drop for Test {
-    fn drop(&mut self) {
-        //println!("Test dropped");
-        //self.stop(); //if we stop on drop might be a problem because we might have clones!
     }
 }
 

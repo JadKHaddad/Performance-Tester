@@ -6,7 +6,7 @@ use poem::{
     web::{Data, Path},
     EndpointExt, Route, Server,
 };
-use rocust_lib::{EndPoint, Status, test::Test};
+use rocust_lib::{EndPoint, Status, test::Test, Runnable};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -67,7 +67,7 @@ fn index(tests: Data<&TestCollection>) -> String {
     let tests: Vec<(String, Status)> = tests
         .clone()
         .into_iter()
-        .map(|(id, test)| (id, test.get_status().read().clone()))
+        .map(|(id, test)| (id, test.get_status()))
         .collect();
     format!("{:?}", tests)
 }

@@ -1,14 +1,20 @@
-use crate::{master::WebSocketMessage, test::Test, Status, LogType, Logger};
+use crate::{master::WebSocketMessage, test::Test, LogType, Logger, Runnable, Status};
+use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
 use futures_util::{future, pin_mut, StreamExt};
 use parking_lot::RwLock;
-use std::{error::Error, sync::{Arc, Mutex}, time::Duration};
+use std::{
+    error::Error,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::{select, task::JoinHandle};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub struct Worker {
+    id: String,
     status: Arc<RwLock<Status>>,
     test: Arc<RwLock<Option<Test>>>,
     master_addr: String,
@@ -20,8 +26,9 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(master_addr: String, logfile_path: String) -> Worker {
+    pub fn new(id: String, master_addr: String, logfile_path: String) -> Worker {
         Worker {
+            id,
             status: Arc::new(RwLock::new(Status::CREATED)),
             test: Arc::new(RwLock::new(None)),
             master_addr,
@@ -38,7 +45,8 @@ impl Worker {
         let (tx, rx) = futures_channel::mpsc::unbounded();
         let (ws_stream, _) = connect_async(url).await?;
         self.set_status(Status::CONNECTED);
-        self.logger.log_buffered(LogType::INFO, "Connected to master");
+        self.logger
+            .log_buffered(LogType::INFO, "Connected to master");
         let (write, read) = ws_stream.split();
         self.tx = Arc::new(RwLock::new(Some(tx)));
 
@@ -170,33 +178,6 @@ impl Worker {
         }
     }
 
-    pub async fn run(&mut self) {
-        let token = self.token.lock().unwrap().clone();
-        select! {
-            _ = token.cancelled() => {
-            }
-            _ = self.run_forever() => {
-            }
-        }
-        self.join_handles().await;
-        self.logger
-            .log_buffered(LogType::INFO, "Terminating... Bye!");
-        //flush buffer
-        let _ = self.logger.flush_buffer().await;
-    }
-
-    pub fn stop(&self) {
-        self.set_status(Status::STOPPED);
-        self.stop_test();
-        self.token.lock().unwrap().cancel();
-    }
-
-    pub fn finish(&self) {
-        self.set_status(Status::FINISHED);
-        self.finish_test();
-        self.token.lock().unwrap().cancel();
-    }
-
     async fn run_update_in_background(&self, thread_sleep_time: u64) {
         let token = self.token.lock().unwrap().clone();
         select! {
@@ -221,5 +202,44 @@ impl Worker {
             println!("Updating");
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
+    }
+}
+
+#[async_trait]
+impl Runnable for Worker {
+    async fn run(&mut self) {
+        let token = self.token.lock().unwrap().clone();
+        select! {
+            _ = token.cancelled() => {
+            }
+            _ = self.run_forever() => {
+            }
+        }
+        self.join_handles().await;
+        self.logger
+            .log_buffered(LogType::INFO, "Terminating... Bye!");
+        //flush buffer
+        let _ = self.logger.flush_buffer().await;
+    }
+
+    fn stop(&self) {
+        self.set_status(Status::STOPPED);
+        self.stop_test();
+        self.token.lock().unwrap().cancel();
+    }
+
+    fn finish(&self) {
+        self.set_status(Status::FINISHED);
+        self.finish_test();
+        self.token.lock().unwrap().cancel();
+    }
+
+    fn get_status(&self) -> Status {
+        let status = &*self.status.read();
+        status.clone()
+    }
+
+    fn get_id(&self) -> &String {
+        &self.id
     }
 }

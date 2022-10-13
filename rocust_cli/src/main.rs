@@ -1,4 +1,4 @@
-use rocust_lib::{master::Master, test::user::User, test::Test, worker::Worker, EndPoint};
+use rocust_lib::{master::Master, test::user::User, test::Test, worker::Worker, EndPoint, Runnable};
 use std::{process::exit, time::Duration};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
@@ -30,10 +30,10 @@ async fn main() {
         format!("log/{}.log", "test1"),
     );
 
-    let master = Master::new(2, test.clone(), String::from("127.0.0.1:3000"), String::from("log/master.log"));
-    let mut worker = Worker::new(String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker1.log"));
-    let mut worker2 = Worker::new(String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker2.log"));
-    let master_c = master.clone();
+    // let mut master = Master::new(String::from("Master"), 2, test.clone(), String::from("127.0.0.1:3000"), String::from("log/master.log"));
+    // let mut worker = Worker::new(String::from("Worker"), String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker1.log"));
+    // let mut worker2 = Worker::new(String::from("Worker 2"), String::from("ws://127.0.0.1:3000/ws"), String::from("log/worker2.log"));
+    // let master_c = master.clone();
 
 
     // tokio::spawn(async move {
@@ -43,18 +43,18 @@ async fn main() {
     // });
 
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        let _ = worker2.run().await;
-        println!("worker2 finished");
-    });
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(Duration::from_secs(1)).await;
+    //     let _ = worker2.run().await;
+    //     println!("worker2 finished");
+    // });
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        let _ = worker.run().await;
-        println!("worker1 finished: {:?}", worker);
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(Duration::from_secs(2)).await;
+    //     let _ = worker.run().await;
+    //     println!("worker1 finished: {:?}", worker);
 
-    });
+    // });
 
     // tokio::time::sleep(Duration::from_secs(3)).await;
     //     println!("Worker spawning");
@@ -69,12 +69,12 @@ async fn main() {
     //     }
     //     println!("worker1 finished");
 
-    let _ = master.run().await;
+    // let _ = master.run().await;
 
-    println!("Master finished: {:?}", master);
-    //println!("{:?}", master);
-    tokio::time::sleep(Duration::from_secs(60)).await;
-    exit(0);
+    // println!("Master finished: {:?}", master);
+    // //println!("{:?}", master);
+    // tokio::time::sleep(Duration::from_secs(60)).await;
+    // exit(0);
     //tokio::time::sleep(Duration::from_secs(60)).await;
 
     // let test_handler = test.clone();
@@ -138,10 +138,10 @@ async fn main() {
         println!("------------------------------");
     }
 
-    println!("before: {:?}", test);
-    let j = serde_json::to_string(&test).unwrap();
-    let u: Test = serde_json::from_str(&j).unwrap();
-    println!("############################################################");
-    println!("after: {:?}", u);
+    // println!("before: {:?}", test);
+    // let j = serde_json::to_string(&test).unwrap();
+    // let u: Test = serde_json::from_str(&j).unwrap();
+    // println!("############################################################");
+    // println!("after: {:?}", u);
     exit(0);
 }

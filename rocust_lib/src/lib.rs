@@ -207,11 +207,12 @@ trait Updatble {
 }
 
 #[async_trait]
-trait Runnable { //TODO: impl for Test, User, Master and Worker
+pub trait Runnable {
     async fn run(&mut self);
-    fn stop(&mut self);
+    fn stop(&self);
+    fn finish(&self);
     fn get_status(&self) -> Status;
-    fn get_id(&self) -> String;
+    fn get_id(&self) -> &String;
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
