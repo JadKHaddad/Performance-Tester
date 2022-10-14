@@ -137,7 +137,7 @@ impl Master {
             workers_count
         };
         let state = Arc::new(State {
-            status: RwLock::new(Status::CREATED),
+            status: RwLock::new(Status::Created),
             workers_count,
             connected_workers: AtomicU32::new(0),
             test,
@@ -172,10 +172,10 @@ impl Master {
             .with(Tracing);
         self.state
             .logger
-            .log_buffered(LogType::INFO, &format!("Running on http://{}", self.addr));
+            .log_buffered(LogType::Info, &format!("Running on http://{}", self.addr));
         self.state
             .logger
-            .log_buffered(LogType::INFO, "Waiting for workers to connect");
+            .log_buffered(LogType::Info, "Waiting for workers to connect");
         println!("Running on http://{}", self.addr);
 
         Server::new(TcpListener::bind(self.addr.clone()))
@@ -194,10 +194,10 @@ impl Master {
                 master_handle
                     .state
                     .logger
-                    .log_buffered(LogType::INFO, &format!("Master finished"));
+                    .log_buffered(LogType::Info, &format!("Master finished"));
             });
         }
-        self.state.logger.log_buffered(LogType::INFO, &run_message);
+        self.state.logger.log_buffered(LogType::Info, &run_message);
     }
 
     fn setup_update_in_background(&self) {
@@ -214,14 +214,14 @@ impl Master {
         if let Some(background_join_handle) = background_join_handle {
             self.state
                 .logger
-                .log_buffered(LogType::INFO, "Waiting for background thread to terminate");
+                .log_buffered(LogType::Info, "Waiting for background thread to terminate");
             match background_join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error while joining background thread: {}", e);
                     self.state
                         .logger
-                        .log_buffered(LogType::ERROR, &format!("{}", e));
+                        .log_buffered(LogType::Error, &format!("{}", e));
                 }
             }
         }
@@ -283,7 +283,7 @@ impl Master {
 #[async_trait]
 impl Runnable for Master {
     async fn run(&mut self) {
-        self.set_status(Status::RUNNING);
+        self.set_status(Status::Running);
         self.run_background_tasks_on_test_start();
         let token = self.token.lock().unwrap().clone();
         select! {
@@ -295,13 +295,13 @@ impl Runnable for Master {
         self.join_handles().await;
         self.state
             .logger
-            .log_buffered(LogType::INFO, "Terminating... Bye!");
+            .log_buffered(LogType::Info, "Terminating... Bye!");
         //flush buffer
         let _ = self.state.logger.flush_buffer().await;
     }
 
     fn stop(&self) {
-        self.set_status(Status::STOPPED);
+        self.set_status(Status::Stopped);
         self.token.lock().unwrap().cancel();
         //on stop tell the workers to stop
         let message = WebSocketMessage::Stop;
@@ -309,13 +309,13 @@ impl Runnable for Master {
             if self.state.broadcast_tx.send(json).is_err() {
                 self.state
                     .logger
-                    .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
+                    .log_buffered(LogType::Error, &format!("Error sending message to worker"));
             }
         }
     }
 
     fn finish(&self) {
-        self.set_status(Status::FINISHED);
+        self.set_status(Status::Finished);
         self.token.lock().unwrap().cancel();
         //send finish message to workers
         let message = WebSocketMessage::Finish;
@@ -323,7 +323,7 @@ impl Runnable for Master {
             if self.state.broadcast_tx.send(json).is_err() {
                 self.state
                     .logger
-                    .log_buffered(LogType::ERROR, &format!("Error sending message to worker"));
+                    .log_buffered(LogType::Error, &format!("Error sending message to worker"));
             }
         }
     }
@@ -360,16 +360,16 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
         test.set_user_count(user_count);
         // TODO: Fix user count
         tokio::spawn(async move {
-            state.logger.log_buffered(LogType::INFO, "Worker connected");
+            state.logger.log_buffered(LogType::Info, "Worker connected");
             if state.get_connected_workers_count() == state.workers_count {
                 state
                     .logger
-                    .log_buffered(LogType::INFO, "All workers connected. Starting test");
+                    .log_buffered(LogType::Info, "All workers connected. Starting test");
 
                 if state.mpsc_tx.send(true).await.is_err() {
                     // this is critical, if it fails, the test will not start, so lets just terminate
                     state.logger.log_buffered(
-                        LogType::ERROR,
+                        LogType::Error,
                         "Error sending message to main thread, test will not start",
                     );
                     // logger will be flushed on end of run method
@@ -383,7 +383,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                     if sender.send(json).is_err() {
                         state
                             .logger
-                            .log_buffered(LogType::ERROR, "Error sending message to worker, results will not be correct, a worker might have disconnected");
+                            .log_buffered(LogType::Error, "Error sending message to worker, results will not be correct, a worker might have disconnected");
                         return;
                     }
                 }
@@ -400,7 +400,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                     } else {
                         state
                             .logger
-                            .log_buffered(LogType::ERROR, &format!("Invalid message: {}", text));
+                            .log_buffered(LogType::Error, &format!("Invalid message: {}", text));
                     }
                     // if sender.send(format!("{}", text)).is_err() {
                     //     break;
@@ -417,12 +417,12 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                 if sink.send(Message::Text(json)).await.is_err() {
                     state_clone
                         .logger
-                        .log_buffered(LogType::ERROR, "Error sending message to worker");
+                        .log_buffered(LogType::Error, "Error sending message to worker");
                     return;
                 }
                 state_clone
                 .logger
-                .log_buffered(LogType::INFO, &format!("Test sent to worker with [{}] users", user_count));
+                .log_buffered(LogType::Info, &format!("Test sent to worker with [{}] users", user_count));
             }
             while let Ok(msg) = receiver.recv().await {
                 if sink.send(Message::Text(msg)).await.is_err() {

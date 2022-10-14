@@ -66,7 +66,7 @@ impl User {
         User {
             client: Client::new(),
             token: Arc::new(Mutex::new(CancellationToken::new())),
-            status: Arc::new(RwLock::new(Status::CREATED)),
+            status: Arc::new(RwLock::new(Status::Created)),
             id,
             sleep,
             host,
@@ -94,7 +94,7 @@ impl User {
     }
 
     async fn run_forever(&mut self) {
-        self.set_status(Status::RUNNING);
+        self.set_status(Status::Running);
         loop {
             tokio::time::sleep(Duration::from_secs(self.select_random_sleep())).await;
             let endpoint = self.select_random_endpoint();
@@ -146,7 +146,7 @@ impl User {
             if let Ok(response) = request.send().await {
                 let duration = start.elapsed();
                 self.logger.log_buffered(
-                    LogType::INFO,
+                    LogType::Info,
                     &format!(
                         "User: [{}] | {} {} | {:?}",
                         self.id,
@@ -164,7 +164,7 @@ impl User {
                 }
             } else {
                 self.logger.log_buffered(
-                    LogType::ERROR,
+                    LogType::Error,
                     &format!(
                         "User: [{}] | {} {} | {:?}",
                         self.id,
@@ -241,21 +241,21 @@ impl Runnable for User {
             }
         }
         self.logger
-            .log_buffered(LogType::INFO, &format!("User [{}] stopped", self.id));
+            .log_buffered(LogType::Info, &format!("User [{}] stopped", self.id));
     }
 
     fn stop(&self) {
         self.token.lock().unwrap().cancel();
-        self.set_status(Status::STOPPED);
+        self.set_status(Status::Stopped);
     }
 
     fn finish(&self) {
         self.token.lock().unwrap().cancel();
         let current_status = self.status.read().clone();
         match current_status {
-            Status::STOPPED => {}
+            Status::Stopped => {}
             _ => {
-                self.set_status(Status::FINISHED);
+                self.set_status(Status::Finished);
             }
         }
     }

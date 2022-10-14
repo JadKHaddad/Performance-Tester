@@ -36,7 +36,7 @@ impl Worker {
     ) -> Worker {
         Worker {
             id,
-            status: Arc::new(RwLock::new(Status::CREATED)),
+            status: Arc::new(RwLock::new(Status::Created)),
             test: Arc::new(RwLock::new(None)),
             master_addr,
             token: Arc::new(Mutex::new(CancellationToken::new())),
@@ -52,9 +52,9 @@ impl Worker {
         let url = url::Url::parse(&self.master_addr)?;
         let (tx, rx) = futures_channel::mpsc::unbounded();
         let (ws_stream, _) = connect_async(url).await?;
-        self.set_status(Status::CONNECTED);
+        self.set_status(Status::Connected);
         self.logger
-            .log_buffered(LogType::INFO, "Connected to master");
+            .log_buffered(LogType::Info, "Connected to master");
         let (write, read) = ws_stream.split();
         self.tx = Arc::new(RwLock::new(Some(tx)));
 
@@ -73,7 +73,7 @@ impl Worker {
                                         );
                                         test.set_run_time(None);
                                         self.logger.log_buffered(
-                                            LogType::INFO,
+                                            LogType::Info,
                                             &format!(
                                                 "Creating Test with [{}] users",
                                                 test.get_user_count()
@@ -83,17 +83,17 @@ impl Worker {
                                     }
 
                                     WebSocketMessage::Start => {
-                                        self.logger.log_buffered(LogType::INFO, "Starting test");
+                                        self.logger.log_buffered(LogType::Info, "Starting test");
                                         self.run_test();
                                     }
 
                                     WebSocketMessage::Stop => {
-                                        self.logger.log_buffered(LogType::INFO, "Stopping test");
+                                        self.logger.log_buffered(LogType::Info, "Stopping test");
                                         self.stop();
                                     }
 
                                     WebSocketMessage::Finish => {
-                                        self.logger.log_buffered(LogType::INFO, "Finishing test");
+                                        self.logger.log_buffered(LogType::Info, "Finishing test");
                                         self.finish();
                                     }
 
@@ -101,15 +101,15 @@ impl Worker {
                                 }
                             } else {
                                 self.logger.log_buffered(
-                                    LogType::ERROR,
+                                    LogType::Error,
                                     &format!("Invalid message: {}", text),
                                 );
                             }
                         }
                         Message::Close(_) => {
                             self.logger
-                                .log_buffered(LogType::INFO, "Closing connection");
-                            self.logger.log_buffered(LogType::INFO, "Stopping test");
+                                .log_buffered(LogType::Info, "Closing connection");
+                            self.logger.log_buffered(LogType::Info, "Stopping test");
                             self.stop();
                         }
                         _ => {}
@@ -142,7 +142,7 @@ impl Worker {
     }
 
     pub fn run_test(&self) {
-        self.set_status(Status::RUNNING);
+        self.set_status(Status::Running);
         let test = self.test.read().clone();
         if let Some(test) = test {
             self.setup_update_in_background();
@@ -169,24 +169,24 @@ impl Worker {
 
         if let Some(background_join_handle) = background_join_handle {
             self.logger
-                .log_buffered(LogType::INFO, "Waiting for background thread to terminate");
+                .log_buffered(LogType::Info, "Waiting for background thread to terminate");
             match background_join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error while joining background thread: {}", e);
-                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                    self.logger.log_buffered(LogType::Error, &format!("{}", e));
                 }
             }
         }
 
         if let Some(test_handle) = test_handle {
             self.logger
-                .log_buffered(LogType::INFO, "Waiting for test to terminate");
+                .log_buffered(LogType::Info, "Waiting for test to terminate");
             match test_handle.await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error while joining test: {}", e);
-                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                    self.logger.log_buffered(LogType::Error, &format!("{}", e));
                 }
             }
         }
@@ -231,19 +231,19 @@ impl Runnable for Worker {
         }
         self.join_handles().await;
         self.logger
-            .log_buffered(LogType::INFO, "Terminating... Bye!");
+            .log_buffered(LogType::Info, "Terminating... Bye!");
         //flush buffer
         let _ = self.logger.flush_buffer().await;
     }
 
     fn stop(&self) {
-        self.set_status(Status::STOPPED);
+        self.set_status(Status::Stopped);
         self.stop_test();
         self.token.lock().unwrap().cancel();
     }
 
     fn finish(&self) {
-        self.set_status(Status::FINISHED);
+        self.set_status(Status::Finished);
         self.finish_test();
         self.token.lock().unwrap().cancel();
     }

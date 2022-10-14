@@ -12,21 +12,21 @@ use std::{error::Error, fmt, sync::Arc};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
 pub enum LogType {
-    INFO,
-    DEBUG,
-    ERROR,
-    TRACE,
-    WARNING,
+    Info,
+    Debug,
+    Error,
+    Trace,
+    Warning,
 }
 
 impl fmt::Display for LogType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            LogType::INFO => write!(f, "INFO"),
-            LogType::DEBUG => write!(f, "DEBUG"),
-            LogType::ERROR => write!(f, "ERROR"),
-            LogType::TRACE => write!(f, "TRACE"),
-            LogType::WARNING => write!(f, "WARNING"),
+            LogType::Info => write!(f, "INFO"),
+            LogType::Debug => write!(f, "DEBUG"),
+            LogType::Error => write!(f, "ERROR"),
+            LogType::Trace => write!(f, "TRACE"),
+            LogType::Warning => write!(f, "WARNING"),
         }
     }
 }

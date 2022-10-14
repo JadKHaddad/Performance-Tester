@@ -54,7 +54,7 @@ impl Test {
     ) -> Self {
         Self {
             id,
-            status: Arc::new(RwLock::new(Status::CREATED)),
+            status: Arc::new(RwLock::new(Status::Created)),
             background_token: Arc::new(Mutex::new(CancellationToken::new())),
             user_count,
             run_time,
@@ -147,7 +147,7 @@ impl Test {
             }
             None => {
                 self.logger.log_buffered(
-                    LogType::WARNING,
+                    LogType::Warning,
                     &format!(
                         "Attempting to stop a user [{}] that does not exist",
                         user_id
@@ -282,7 +282,7 @@ impl Test {
 impl Runnable for Test {
     async fn run(&mut self) {
         self.set_start_timestamp(Instant::now());
-        self.set_status(Status::RUNNING);
+        self.set_status(Status::Running);
         //run background thread
         let test_handle = self.clone();
         let background_join_handle = tokio::spawn(async move {
@@ -298,15 +298,15 @@ impl Runnable for Test {
                 test_handle.finish();
                 test_handle
                     .logger
-                    .log_buffered(LogType::INFO, &format!("Test finished"));
+                    .log_buffered(LogType::Info, &format!("Test finished"));
             });
         }
-        self.logger.log_buffered(LogType::INFO, &run_message);
+        self.logger.log_buffered(LogType::Info, &run_message);
         let mut user_join_handles = vec![];
         for i in 0..self.user_count {
             let user_id = i;
             self.logger
-                .log_buffered(LogType::INFO, &format!("Spawning user: [{}]", user_id));
+                .log_buffered(LogType::Info, &format!("Spawning user: [{}]", user_id));
             let mut user = self.create_user(user_id.to_string());
             let user_join_handle = tokio::spawn(async move {
                 user.run().await;
@@ -314,42 +314,42 @@ impl Runnable for Test {
             user_join_handles.push(user_join_handle);
         }
         self.logger
-            .log_buffered(LogType::INFO, &format!("All users have been spawned"));
+            .log_buffered(LogType::Info, &format!("All users have been spawned"));
         for join_handle in user_join_handles {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
                     println!("Error while joining user: {}", e);
-                    self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                    self.logger.log_buffered(LogType::Error, &format!("{}", e));
                 }
             }
         }
         self.set_end_timestamp(Instant::now());
         self.logger
-            .log_buffered(LogType::INFO, &format!("All users have been stopped"));
+            .log_buffered(LogType::Info, &format!("All users have been stopped"));
         //stop background thread
         self.background_token.lock().unwrap().cancel();
         match background_join_handle.await {
             Ok(_) => {}
             Err(e) => {
-                self.logger.log_buffered(LogType::ERROR, &format!("{}", e));
+                self.logger.log_buffered(LogType::Error, &format!("{}", e));
             }
         }
         self.logger
-            .log_buffered(LogType::INFO, &format!("Background thread stopped"));
+            .log_buffered(LogType::Info, &format!("Background thread stopped"));
         //flush buffer
         let _ = self.logger.flush_buffer().await;
     }
 
     fn stop(&self) {
-        self.set_status(Status::STOPPED);
+        self.set_status(Status::Stopped);
         for user in self.users.read().iter() {
             user.stop();
         }
     }
 
     fn finish(&self) {
-        self.set_status(Status::FINISHED);
+        self.set_status(Status::Finished);
         for user in self.users.read().iter() {
             user.finish();
         }
