@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum WebSocketMessage {
-    Create(Test, u32),
+    Create(Test),
     Start,
     Stop,
     Finish,
@@ -55,8 +55,8 @@ impl WebSocketMessage {
 impl fmt::Display for WebSocketMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WebSocketMessage::Create(test, user_count) => {
-                write!(f, "Create(Test: {} | User count: {})", test, user_count)
+            WebSocketMessage::Create(test) => {
+                write!(f, "Create(Test: {})", test)
             }
             WebSocketMessage::Start => write!(f, "Start"),
             WebSocketMessage::Stop => write!(f, "Stop"),
@@ -77,16 +77,23 @@ struct State {
     background_join_handle: RwLock<Option<JoinHandle<()>>>,
     mpsc_tx: mpsc::Sender<bool>,
     master_cancel_token: CancellationToken,
+    remaining_users: AtomicU32,
 }
 
 impl State {
-    fn increase_connected_workers(&self) {
+    fn get_remaining_users_count(&self) -> u32 {
+        self.remaining_users.load(SeqCst)
+    }
+    fn set_remaining_users_count(&self, value: u32) {
+        self.remaining_users.store(value, SeqCst);
+    }
+    fn increase_connected_workers_count(&self) {
         self.connected_workers.fetch_add(1, SeqCst);
     }
-    fn decrease_connected_workers(&self) {
+    fn decrease_connected_workers_count(&self) {
         self.connected_workers.fetch_sub(1, SeqCst);
     }
-    fn get_connected_workers(&self) -> u32 {
+    fn get_connected_workers_count(&self) -> u32 {
         self.connected_workers.load(SeqCst)
     }
     pub fn set_status(&self, status: Status) {
@@ -94,6 +101,9 @@ impl State {
     }
     fn terminate(&self) {
         self.master_cancel_token.cancel();
+    }
+    fn get_workers_count(&self) -> u32 {
+        self.workers_count
     }
 }
 
@@ -120,6 +130,12 @@ impl Master {
         let (broadcast_tx, _) = broadcast::channel(100);
         let (mpsc_tx, mpsc_rx) = mpsc::channel::<bool>(1);
         let cancelation_token = CancellationToken::new();
+        let user_count = test.get_user_count();
+        let workers_count = if workers_count > user_count {
+            user_count
+        } else {
+            workers_count
+        };
         let state = Arc::new(State {
             status: RwLock::new(Status::CREATED),
             workers_count,
@@ -130,6 +146,7 @@ impl Master {
             background_join_handle: RwLock::new(None),
             mpsc_tx,
             master_cancel_token: cancelation_token.clone(),
+            remaining_users: AtomicU32::new(user_count),
         });
         Master {
             id,
@@ -330,11 +347,21 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
 
     ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
-        let test = state.test.clone();
+        let mut test = state.test.clone();
+        state.increase_connected_workers_count();
+        // TODO: Fix user count
+        let remaining_users_count = state.get_remaining_users_count();
+        let mut user_count = test.get_user_count() / state.get_workers_count();
+        println!("{}", user_count);
+        if remaining_users_count < user_count {
+            user_count = remaining_users_count;
+        }
+        state.set_remaining_users_count(remaining_users_count - user_count);
+        test.set_user_count(user_count);
+        // TODO: Fix user count
         tokio::spawn(async move {
-            state.increase_connected_workers();
             state.logger.log_buffered(LogType::INFO, "Worker connected");
-            if state.get_connected_workers() == state.workers_count {
+            if state.get_connected_workers_count() == state.workers_count {
                 state
                     .logger
                     .log_buffered(LogType::INFO, "All workers connected. Starting test");
@@ -380,13 +407,12 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                     // }
                 }
             }
-            state.decrease_connected_workers();
+            state.decrease_connected_workers_count();
         });
 
         tokio::spawn(async move {
             // send the test and the user count to the worker, when the worker is connected
-            // TODO: calculate user count
-            let message = WebSocketMessage::Create(test, 1);
+            let message = WebSocketMessage::Create(test);
             if let Some(json) = message.into_json() {
                 if sink.send(Message::Text(json)).await.is_err() {
                     state_clone
@@ -394,6 +420,9 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                         .log_buffered(LogType::ERROR, "Error sending message to worker");
                     return;
                 }
+                state_clone
+                .logger
+                .log_buffered(LogType::INFO, &format!("Test sent to worker with [{}] users", user_count));
             }
             while let Ok(msg) = receiver.recv().await {
                 if sink.send(Message::Text(msg)).await.is_err() {

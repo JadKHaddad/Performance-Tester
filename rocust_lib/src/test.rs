@@ -182,6 +182,10 @@ impl Test {
         self.run_time = run_time;
     }
 
+    pub fn set_user_count(&mut self, user_count: u32) {
+        self.user_count = user_count;
+    }
+
     pub fn print_stats(&self) {
         let mut table = Table::new();
         table.add_row(row![
@@ -247,6 +251,10 @@ impl Test {
             (Some(start), None) => Some(Instant::now().duration_since(start)),
             _ => None,
         }
+    }
+
+    pub fn get_user_count(&self) -> u32 {
+        self.user_count
     }
 
     pub fn get_users(&self) -> &Arc<RwLock<Vec<User>>> {

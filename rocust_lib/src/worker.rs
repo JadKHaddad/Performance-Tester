@@ -66,7 +66,7 @@ impl Worker {
                         Message::Text(text) => {
                             if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
                                 match ws_message {
-                                    WebSocketMessage::Create(mut test, user_count) => {
+                                    WebSocketMessage::Create(mut test) => {
                                         test.set_logger(self.logger.clone());
                                         test.set_print_stats_to_console(
                                             self.print_stats_to_console,
@@ -74,7 +74,10 @@ impl Worker {
                                         test.set_run_time(None);
                                         self.logger.log_buffered(
                                             LogType::INFO,
-                                            &format!("Creating Test with [{}] users", user_count),
+                                            &format!(
+                                                "Creating Test with [{}] users",
+                                                test.get_user_count()
+                                            ),
                                         );
                                         *self.test.write() = Some(test);
                                     }
