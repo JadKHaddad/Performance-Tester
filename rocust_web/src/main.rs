@@ -37,6 +37,8 @@ fn add_test(Path(id): Path<String>, tests: Data<&TestCollection>) -> String {
         ],
         None,
         format!("log/{}.log", id),
+        false,
+        false,
     );
 
     tests.insert(id.clone(), new_test);

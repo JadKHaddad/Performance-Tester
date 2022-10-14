@@ -23,20 +23,28 @@ pub struct Worker {
     test_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     background_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     tx: Arc<RwLock<Option<UnboundedSender<Message>>>>,
+    print_stats_to_console: bool,
 }
 
 impl Worker {
-    pub fn new(id: String, master_addr: String, logfile_path: String) -> Worker {
+    pub fn new(
+        id: String,
+        master_addr: String,
+        logfile_path: String,
+        print_log_to_console: bool,
+        print_stats_to_console: bool,
+    ) -> Worker {
         Worker {
             id,
             status: Arc::new(RwLock::new(Status::CREATED)),
             test: Arc::new(RwLock::new(None)),
             master_addr,
             token: Arc::new(Mutex::new(CancellationToken::new())),
-            logger: Arc::new(Logger::new(logfile_path)),
+            logger: Arc::new(Logger::new(logfile_path, print_log_to_console)),
             test_join_handle: Arc::new(RwLock::new(None)),
             background_join_handle: Arc::new(RwLock::new(None)),
             tx: Arc::new(RwLock::new(None)),
+            print_stats_to_console,
         }
     }
 
@@ -60,6 +68,9 @@ impl Worker {
                                 match ws_message {
                                     WebSocketMessage::Create(mut test, user_count) => {
                                         test.set_logger(self.logger.clone());
+                                        test.set_print_stats_to_console(
+                                            self.print_stats_to_console,
+                                        );
                                         test.set_run_time(None);
                                         self.logger.log_buffered(
                                             LogType::INFO,

@@ -36,6 +36,7 @@ pub struct Test {
     end_timestamp: Arc<RwLock<Option<Instant>>>,   //
     users: Arc<RwLock<Vec<User>>>,
     logger: Arc<Logger>,
+    print_stats_to_console: Arc<bool>,
 }
 
 impl Test {
@@ -48,6 +49,8 @@ impl Test {
         endpoints: Vec<EndPoint>,
         global_headers: Option<HashMap<String, String>>,
         logfile_path: String,
+        print_log_to_console: bool,
+        print_stats_to_console: bool,
     ) -> Self {
         Self {
             id,
@@ -63,7 +66,8 @@ impl Test {
             start_timestamp: Arc::new(RwLock::new(None)),
             end_timestamp: Arc::new(RwLock::new(None)),
             users: Arc::new(RwLock::new(Vec::new())),
-            logger: Arc::new(Logger::new(logfile_path)),
+            logger: Arc::new(Logger::new(logfile_path, print_log_to_console)),
+            print_stats_to_console: Arc::new(print_stats_to_console),
         }
     }
 
@@ -112,7 +116,9 @@ impl Test {
                 self.calculate_failed_requests_per_second(&elapsed);
             }
             //print stats
-            self.print_stats();
+            if *self.print_stats_to_console {
+                self.print_stats();
+            }
             //log
             let _ = self.logger.flush_buffer().await;
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
@@ -150,6 +156,10 @@ impl Test {
                 Err(String::from("User not found"))
             }
         }
+    }
+
+    pub fn set_print_stats_to_console(&mut self, print_stats_to_console: bool) {
+        self.print_stats_to_console = Arc::new(print_stats_to_console);
     }
 
     pub fn set_start_timestamp(&self, start_timestamp: Instant) {
@@ -429,7 +439,7 @@ impl Serialize for Test {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("Test", 11)?;
+        let mut state = serializer.serialize_struct("Test", 12)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("status", &*self.status.read())?;
         state.serialize_field("user_count", &self.user_count)?;
@@ -441,6 +451,7 @@ impl Serialize for Test {
         state.serialize_field("results", &*self.results.read())?;
         state.serialize_field("users", &*self.users.read())?;
         state.serialize_field("logger", &*self.logger)?;
+        state.serialize_field("print_stats_to_console", &*self.print_stats_to_console)?;
         state.end()
     }
 }
@@ -466,6 +477,7 @@ impl<'de> Deserialize<'de> for Test {
             Results,
             Users,
             Logger,
+            PrintStatsToConsole,
         }
         impl<'de> Visitor<'de> for TestVisitor {
             type Value = Test;
@@ -489,6 +501,8 @@ impl<'de> Deserialize<'de> for Test {
                 let mut results: Option<Results> = None;
                 let mut users: Option<Vec<User>> = None;
                 let mut logger: Option<Logger> = None;
+                let mut print_stats_to_console: Option<bool> = None;
+
                 while let Some(key) = map.next_key()? {
                     match key {
                         Field::Id => {
@@ -557,6 +571,14 @@ impl<'de> Deserialize<'de> for Test {
                             }
                             logger = Some(map.next_value()?);
                         }
+                        Field::PrintStatsToConsole => {
+                            if print_stats_to_console.is_some() {
+                                return Err(serde::de::Error::duplicate_field(
+                                    "print_stats_to_console",
+                                ));
+                            }
+                            print_stats_to_console = Some(map.next_value()?);
+                        }
                     }
                 }
 
@@ -575,6 +597,9 @@ impl<'de> Deserialize<'de> for Test {
                 let results = results.ok_or_else(|| serde::de::Error::missing_field("results"))?;
                 let users = users.ok_or_else(|| serde::de::Error::missing_field("users"))?;
                 let logger = logger.ok_or_else(|| serde::de::Error::missing_field("logger"))?;
+                let print_stats_to_console = print_stats_to_console
+                    .ok_or_else(|| serde::de::Error::missing_field("print_stats_to_console"))?;
+
                 Ok(Test {
                     id,
                     status: Arc::new(RwLock::new(status)),
@@ -590,6 +615,7 @@ impl<'de> Deserialize<'de> for Test {
                     end_timestamp: Arc::new(RwLock::new(None)),
                     users: Arc::new(RwLock::new(users)),
                     logger: Arc::new(logger),
+                    print_stats_to_console: Arc::new(print_stats_to_console),
                 })
             }
         }

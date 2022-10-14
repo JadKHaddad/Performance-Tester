@@ -1,12 +1,15 @@
-use std::{error::Error, fmt, sync::Arc};
-use tokio::{fs::OpenOptions, io::AsyncWriteExt};
-use chrono::{format::{DelayedFormat, StrftimeItems}, DateTime, Utc};
+use chrono::{
+    format::{DelayedFormat, StrftimeItems},
+    DateTime, Utc,
+};
 use parking_lot::RwLock;
 use serde::{
     de::{MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::{error::Error, fmt, sync::Arc};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 
 pub enum LogType {
     INFO,
@@ -32,14 +35,20 @@ impl fmt::Display for LogType {
 pub struct Logger {
     logfile_path: String,
     buffer: Arc<RwLock<Vec<String>>>,
+    print_to_console: bool,
 }
 
 impl Logger {
-    pub fn new(logfile_path: String) -> Logger {
+    pub fn new(logfile_path: String, print_to_console: bool) -> Logger {
         Logger {
             logfile_path,
             buffer: Arc::new(RwLock::new(Vec::new())),
+            print_to_console,
         }
+    }
+
+    pub fn set_print_to_console(&mut self, print_to_console: bool) {
+        self.print_to_console = print_to_console;
     }
 
     fn get_date_and_time(&self) -> DelayedFormat<StrftimeItems> {
@@ -52,9 +61,11 @@ impl Logger {
     }
 
     pub fn log_buffered(&self, log_type: LogType, message: &str) {
-        self.buffer
-            .write()
-            .push(self.format_message(log_type, message));
+        let msg = self.format_message(log_type, message);
+        if self.print_to_console {
+            println!("{}", msg);
+        }
+        self.buffer.write().push(msg);
     }
 
     pub async fn flush_buffer(&self) -> Result<(), Box<dyn Error>> {
@@ -79,6 +90,10 @@ impl Logger {
     }
 
     pub async fn log(&self, log_type: LogType, message: &str) -> Result<(), Box<dyn Error>> {
+        let msg = self.format_message(log_type, message);
+        if self.print_to_console {
+            println!("{}", msg);
+        }
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
@@ -86,8 +101,7 @@ impl Logger {
             .open(&self.logfile_path)
             .await?;
 
-        file.write(self.format_message(log_type, message).as_bytes())
-            .await?;
+        file.write(msg.as_bytes()).await?;
         Ok(())
     }
 }
@@ -143,6 +157,7 @@ impl<'de> Deserialize<'de> for Logger {
                 Ok(Logger {
                     logfile_path,
                     buffer: Arc::new(RwLock::new(Vec::new())),
+                    print_to_console: false,
                 })
             }
         }

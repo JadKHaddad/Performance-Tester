@@ -76,6 +76,7 @@ struct State {
     logger: Logger,
     background_join_handle: RwLock<Option<JoinHandle<()>>>,
     mpsc_tx: mpsc::Sender<bool>,
+    master_cancel_token: CancellationToken,
 }
 
 impl State {
@@ -91,6 +92,9 @@ impl State {
     pub fn set_status(&self, status: Status) {
         *self.status.write() = status;
     }
+    fn terminate(&self) {
+        self.master_cancel_token.cancel();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +104,7 @@ pub struct Master {
     addr: String,
     state: Arc<State>,
     mpsc_rx: Arc<RwLock<Option<mpsc::Receiver<bool>>>>,
+    print_stats_to_console: Arc<bool>,
 }
 
 impl Master {
@@ -109,25 +114,30 @@ impl Master {
         test: Test,
         addr: String,
         logfile_path: String,
+        print_log_to_console: bool,
+        print_stats_to_console: bool,
     ) -> Master {
         let (broadcast_tx, _) = broadcast::channel(100);
         let (mpsc_tx, mpsc_rx) = mpsc::channel::<bool>(1);
+        let cancelation_token = CancellationToken::new();
         let state = Arc::new(State {
             status: RwLock::new(Status::CREATED),
             workers_count,
             connected_workers: AtomicU32::new(0),
             test,
             broadcast_tx,
-            logger: Logger::new(logfile_path),
+            logger: Logger::new(logfile_path, print_log_to_console),
             background_join_handle: RwLock::new(None),
             mpsc_tx,
+            master_cancel_token: cancelation_token.clone(),
         });
         Master {
             id,
-            token: Arc::new(Mutex::new(CancellationToken::new())),
+            token: Arc::new(Mutex::new(cancelation_token)),
             addr,
             state,
             mpsc_rx: Arc::new(RwLock::new(Some(mpsc_rx))),
+            print_stats_to_console: Arc::new(print_stats_to_console),
         }
     }
 
@@ -160,7 +170,6 @@ impl Master {
         let master_handle = self.clone();
         let mut run_message = String::from("Test running forever, press ctrl+c to stop");
         if let Some(run_time) = master_handle.state.test.get_run_time().clone() {
-            //TODO: Start timer when all workers are connected
             run_message = format!("Test running for {} seconds", run_time);
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(run_time)).await;
@@ -176,7 +185,7 @@ impl Master {
 
     fn setup_update_in_background(&self) {
         //run background thread
-        let master_handle = self.clone(); // TODO in run test
+        let master_handle = self.clone();
         let background_join_handle = tokio::spawn(async move {
             master_handle.run_update_in_background(1).await;
         });
@@ -244,7 +253,9 @@ impl Master {
                     .calculate_failed_requests_per_second(&elapsed);
             }
             //print stats
-            self.state.test.print_stats();
+            if *self.print_stats_to_console {
+                self.state.test.print_stats();
+            }
             //log
             let _ = self.state.logger.flush_buffer().await;
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
@@ -327,27 +338,28 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                 state
                     .logger
                     .log_buffered(LogType::INFO, "All workers connected. Starting test");
+
+                if state.mpsc_tx.send(true).await.is_err() {
+                    // this is critical, if it fails, the test will not start, so lets just terminate
+                    state.logger.log_buffered(
+                        LogType::ERROR,
+                        "Error sending message to main thread, test will not start",
+                    );
+                    // logger will be flushed on end of run method
+                    state.terminate();
+                    return;
+                }
+                state.test.set_start_timestamp(Instant::now());
+                //Test will not start here, it will start in the workers
                 let message = WebSocketMessage::Start;
                 if let Some(json) = message.into_json() {
                     if sender.send(json).is_err() {
                         state
                             .logger
-                            .log_buffered(LogType::ERROR, "Error sending message to worker");
+                            .log_buffered(LogType::ERROR, "Error sending message to worker, results will not be correct, a worker might have disconnected");
                         return;
                     }
                 }
-                if state.mpsc_tx.send(true).await.is_err() {
-                    //TODO: this is critical, if it fails, the test will not start, so lets just panic
-                    state.logger.log_buffered(
-                        LogType::ERROR,
-                        "Error sending message to main thread, test will not start, exiting",
-                    );
-                    let _ = state.logger.flush_buffer().await;
-                    //TODO: do not panic, return error and exit
-                    panic!("Error sending message to main thread, test will not start, exiting");
-                }
-                state.test.set_start_timestamp(Instant::now());
-                //Test will not start here, it will start in the workers
             }
             while let Some(Ok(msg)) = stream.next().await {
                 if let Message::Text(text) = msg {
