@@ -29,6 +29,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+pub const WS_ENDPOINT: &str = "/ws";
+
 #[derive(Debug, Deserialize, Serialize)]
 pub enum WebSocketMessage {
     Create(Test),
@@ -105,6 +107,20 @@ impl State {
     fn get_workers_count(&self) -> u32 {
         self.workers_count
     }
+    fn set_test_workers_count(&self, test: &mut Test) -> u32 {
+        let remaining_users_count = self.get_remaining_users_count();
+        let mut user_count = test.get_user_count() / self.get_workers_count();
+        if remaining_users_count < user_count {
+            user_count = remaining_users_count;
+        }
+        let new_remainning_users_count = remaining_users_count - user_count;
+        if new_remainning_users_count < user_count {
+            user_count = user_count + new_remainning_users_count;
+        }
+        self.set_remaining_users_count(remaining_users_count - user_count);
+        test.set_user_count(user_count);
+        user_count
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -131,7 +147,9 @@ impl Master {
         let (mpsc_tx, mpsc_rx) = mpsc::channel::<bool>(1);
         let cancelation_token = CancellationToken::new();
         let user_count = test.get_user_count();
+        let mut log_message = false;
         let workers_count = if workers_count > user_count {
+            log_message = true;
             user_count
         } else {
             workers_count
@@ -148,6 +166,15 @@ impl Master {
             master_cancel_token: cancelation_token.clone(),
             remaining_users: AtomicU32::new(user_count),
         });
+        if log_message {
+            state.logger.log_buffered(
+                LogType::Warning,
+                &format!(
+                    "Workers count is greater than user count. Workers count will be set to [{}]",
+                    user_count
+                ),
+            );
+        }
         Master {
             id,
             token: Arc::new(Mutex::new(cancelation_token)),
@@ -168,7 +195,7 @@ impl Master {
         tracing_subscriber::fmt::init();
 
         let app = Route::new()
-            .at("/ws", get(ws.data(self.state.clone())))
+            .at(WS_ENDPOINT, get(ws.data(self.state.clone())))
             .with(Tracing);
         self.state
             .logger
@@ -349,16 +376,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
         let (mut sink, mut stream) = socket.split();
         let mut test = state.test.clone();
         state.increase_connected_workers_count();
-        // TODO: Fix user count
-        let remaining_users_count = state.get_remaining_users_count();
-        let mut user_count = test.get_user_count() / state.get_workers_count();
-        println!("{}", user_count);
-        if remaining_users_count < user_count {
-            user_count = remaining_users_count;
-        }
-        state.set_remaining_users_count(remaining_users_count - user_count);
-        test.set_user_count(user_count);
-        // TODO: Fix user count
+        let user_count = state.set_test_workers_count(&mut test);
         tokio::spawn(async move {
             state.logger.log_buffered(LogType::Info, "Worker connected");
             if state.get_connected_workers_count() == state.workers_count {

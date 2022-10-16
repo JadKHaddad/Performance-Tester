@@ -1,4 +1,4 @@
-use crate::{master::WebSocketMessage, LogType, Logger, Runnable, Status, Test};
+use crate::{master::{WebSocketMessage, WS_ENDPOINT}, LogType, Logger, Runnable, Status, Test};
 use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
 use futures_util::{future, pin_mut, StreamExt};
@@ -49,7 +49,9 @@ impl Worker {
     }
 
     pub async fn run_forever(&mut self) -> Result<(), Box<dyn Error>> {
-        let url = url::Url::parse(&self.master_addr)?;
+        //TODO: let address be given as http://example.com:3000/ or https://example.com:3000 or example.com:3000 then extract the protocol and port from it and use ws or wss accordingly
+        let url = url::Url::parse(&format!("ws://{}", &self.master_addr))?;
+        let url = url.join(WS_ENDPOINT)?;
         let (tx, rx) = futures_channel::mpsc::unbounded();
         let (ws_stream, _) = connect_async(url).await?;
         self.set_status(Status::Connected);
