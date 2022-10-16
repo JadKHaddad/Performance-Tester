@@ -56,14 +56,18 @@ impl Logger {
         now.format("%Y.%m.%d %H:%M:%S")
     }
 
-    fn format_message(&self, log_type: LogType, message: &str) -> String {
+    fn format_message(&self, log_type: &LogType, message: &str) -> String {
         format!("{} {} {}", self.get_date_and_time(), log_type, message)
     }
 
     pub fn log_buffered(&self, log_type: LogType, message: &str) {
-        let msg = self.format_message(log_type, message);
+        let msg = self.format_message(&log_type, message);
         if self.print_to_console {
-            println!("{}", msg);
+            if let LogType::Error = log_type {
+                eprintln!("{}", msg);
+            } else {
+                println!("{}", msg);
+            }
         }
         self.buffer.write().push(msg);
     }
@@ -90,9 +94,13 @@ impl Logger {
     }
 
     pub async fn log(&self, log_type: LogType, message: &str) -> Result<(), Box<dyn Error>> {
-        let msg = self.format_message(log_type, message);
+        let msg = self.format_message(&log_type, message);
         if self.print_to_console {
-            println!("{}", msg);
+            if let LogType::Error = log_type {
+                eprintln!("{}", msg);
+            } else {
+                println!("{}", msg);
+            }
         }
         let mut file = OpenOptions::new()
             .write(true)
@@ -101,7 +109,7 @@ impl Logger {
             .open(&self.logfile_path)
             .await?;
 
-        file.write(msg.as_bytes()).await?;
+        file.write(format!("{}\n", msg).as_bytes()).await?;
         Ok(())
     }
 }

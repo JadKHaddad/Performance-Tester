@@ -319,8 +319,8 @@ impl Runnable for Test {
             match join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error while joining user: {}", e);
-                    self.logger.log_buffered(LogType::Error, &format!("{}", e));
+                    self.logger
+                        .log_buffered(LogType::Error, &format!("Error while joining user: {}", e));
                 }
             }
         }

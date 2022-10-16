@@ -29,7 +29,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-pub const WS_ENDPOINT: &str = "/ws";
+pub const WS_ENDPOINT: &str = "ws";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum WebSocketMessage {
@@ -195,15 +195,17 @@ impl Master {
         tracing_subscriber::fmt::init();
 
         let app = Route::new()
-            .at(WS_ENDPOINT, get(ws.data(self.state.clone())))
+            .at(
+                format!("/{}", WS_ENDPOINT),
+                get(ws.data(self.state.clone())),
+            )
             .with(Tracing);
         self.state
             .logger
-            .log_buffered(LogType::Info, &format!("Running on http://{}", self.addr));
+            .log_buffered(LogType::Info, &format!("Running on {}", self.addr));
         self.state
             .logger
             .log_buffered(LogType::Info, "Waiting for workers to connect");
-        println!("Running on http://{}", self.addr);
 
         Server::new(TcpListener::bind(self.addr.clone()))
             .run(app)
@@ -245,10 +247,10 @@ impl Master {
             match background_join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error while joining background thread: {}", e);
-                    self.state
-                        .logger
-                        .log_buffered(LogType::Error, &format!("{}", e));
+                    self.state.logger.log_buffered(
+                        LogType::Error,
+                        &format!("Error while joining background thread: {}", e),
+                    );
                 }
             }
         }

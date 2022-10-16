@@ -43,14 +43,14 @@ async fn main() {
     );
     let mut worker = Worker::new(
         String::from("Worker"),
-        String::from("127.0.0.1:3000"),
+        String::from("http://127.0.0.1:3000"),
         String::from("log/worker1.log"),
         false,
         false,
     );
     let mut worker2 = Worker::new(
         String::from("Worker 2"),
-        String::from("127.0.0.1:3000/"),
+        String::from("http://127.0.0.1:3000/"),
         String::from("log/worker2.log"),
         true,
         false,

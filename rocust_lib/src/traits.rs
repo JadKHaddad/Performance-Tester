@@ -18,16 +18,18 @@ pub trait HasResults {
 #[async_trait]
 pub trait Runnable {
     async fn run(&mut self);
+    // TODO: async fn run(&mut self) -> Result<(), Box<dyn Error>>;
     fn stop(&self);
     fn finish(&self);
     fn get_status(&self) -> Status;
     fn get_id(&self) -> &String;
 }
 
+// TODO: use somewhere
 #[async_trait]
-pub trait Jsonable // TODO: use somewhere
+pub trait Jsonable
 where
-    Self: Sized + DeserializeOwned + Serialize
+    Self: Sized + DeserializeOwned + Serialize,
 {
     fn from_json(json: &str) -> Result<Self, Box<dyn Error>> {
         let res: Self = serde_json::from_str(json)?;
@@ -40,12 +42,12 @@ where
         Ok(res)
     }
 
-    fn into_json(&self) -> Result<String, Box<dyn Error>>{
+    fn into_json(&self) -> Result<String, Box<dyn Error>> {
         let json = serde_json::to_string(self)?;
         Ok(json)
     }
-    
-    async fn into_file(&self, path: &str) -> Result<(), Box<dyn Error>>{
+
+    async fn into_file(&self, path: &str) -> Result<(), Box<dyn Error>> {
         let json = self.into_json()?;
         fs::write(path, json).await?;
         Ok(())

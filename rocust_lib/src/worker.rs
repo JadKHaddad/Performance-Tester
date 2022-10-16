@@ -1,4 +1,7 @@
-use crate::{master::{WebSocketMessage, WS_ENDPOINT}, LogType, Logger, Runnable, Status, Test};
+use crate::{
+    master::{WebSocketMessage, WS_ENDPOINT},
+    LogType, Logger, Runnable, Status, Test,
+};
 use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
 use futures_util::{future, pin_mut, StreamExt};
@@ -48,15 +51,72 @@ impl Worker {
         }
     }
 
+    async fn parse_url(&self) -> Result<url::Url, Box<dyn Error>> {
+        let url = match url::Url::parse(&self.master_addr) {
+            Ok(url) => url,
+            Err(e) => {
+                let message = format!("Error parsing url: {}", e);
+                let _ = self.logger.log(LogType::Error, &message).await;
+                return Err(Box::new(e));
+            }
+        };
+        let ws_scheme: &str;
+        let host: String;
+        let port: u16;
+        let origin = url.origin();
+        match origin {
+            url::Origin::Tuple(scheme, _host, _port) => {
+                if scheme == String::from("http") {
+                    ws_scheme = "ws";
+                } else if scheme == String::from("https") {
+                    ws_scheme = "wss";
+                } else {
+                    let message = format!("Unknown scheme: {}", scheme);
+                    let _ = self.logger.log(LogType::Error, &message).await;
+                    return Err(message.into());
+                }
+                match _host {
+                    url::Host::Domain(d) => {
+                        host = d;
+                    }
+                    url::Host::Ipv4(i) => {
+                        host = i.to_string();
+                    }
+                    url::Host::Ipv6(i) => {
+                        host = i.to_string();
+                    }
+                }
+                port = _port;
+            }
+            _ => {
+                let message = format!("Invalid url: {}", url);
+                let _ = self.logger.log(LogType::Error, &message).await;
+                return Err(message.into());
+            }
+        }
+        let url =
+            url::Url::parse(&format!("{}://{}:{}", ws_scheme, host, port))?.join(WS_ENDPOINT)?;
+        Ok(url)
+    }
+
     pub async fn run_forever(&mut self) -> Result<(), Box<dyn Error>> {
-        //TODO: let address be given as http://example.com:3000/ or https://example.com:3000 or example.com:3000 then extract the protocol and port from it and use ws or wss accordingly
-        let url = url::Url::parse(&format!("ws://{}", &self.master_addr))?;
-        let url = url.join(WS_ENDPOINT)?;
+        let url = self.parse_url().await?;
+        let _ = self
+            .logger
+            .log(LogType::Info, &format!("Connecting to master on [{}]", url))
+            .await;
+
         let (tx, rx) = futures_channel::mpsc::unbounded();
-        let (ws_stream, _) = connect_async(url).await?;
+        let (ws_stream, _) = match connect_async(url).await {
+            Ok((ws_stream, res)) => (ws_stream, res),
+            Err(e) => {
+                let message = format!("Error connecting to master: {}", e);
+                let _ = self.logger.log(LogType::Error, &message).await;
+                return Err(Box::new(e));
+            }
+        };
         self.set_status(Status::Connected);
-        self.logger
-            .log_buffered(LogType::Info, "Connected to master");
+        let _ = self.logger.log(LogType::Info, "Connected to master").await;
         let (write, read) = ws_stream.split();
         self.tx = Arc::new(RwLock::new(Some(tx)));
 
@@ -175,8 +235,10 @@ impl Worker {
             match background_join_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error while joining background thread: {}", e);
-                    self.logger.log_buffered(LogType::Error, &format!("{}", e));
+                    self.logger.log_buffered(
+                        LogType::Error,
+                        &format!("Error while joining background thread: {}", e),
+                    );
                 }
             }
         }
@@ -187,8 +249,8 @@ impl Worker {
             match test_handle.await {
                 Ok(_) => {}
                 Err(e) => {
-                    println!("Error while joining test: {}", e);
-                    self.logger.log_buffered(LogType::Error, &format!("{}", e));
+                    self.logger
+                        .log_buffered(LogType::Error, &format!("Error while joining test: {}", e));
                 }
             }
         }
