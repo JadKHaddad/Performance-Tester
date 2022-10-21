@@ -8,6 +8,7 @@ pub enum Status {
     Running,
     Stopped,
     Finished,
+    Error(String),
 }
 
 impl fmt::Display for Status {
@@ -18,6 +19,7 @@ impl fmt::Display for Status {
             Status::Running => write!(f, "RUNNING"),
             Status::Stopped => write!(f, "STOPPED"),
             Status::Finished => write!(f, "FINISHED"),
+            Status::Error(ref msg) => write!(f, "Error [{}]", msg),
         }
     }
 }

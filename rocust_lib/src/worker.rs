@@ -55,9 +55,7 @@ impl Worker {
         let url = match url::Url::parse(&self.master_addr) {
             Ok(url) => url,
             Err(e) => {
-                let message = format!("Error parsing url: {}", e);
-                let _ = self.logger.log(LogType::Error, &message).await;
-                return Err(Box::new(e));
+                return Err(e.into());
             }
         };
         let ws_scheme: &str;
@@ -72,7 +70,6 @@ impl Worker {
                     ws_scheme = "wss";
                 } else {
                     let message = format!("Unknown scheme: {}", scheme);
-                    let _ = self.logger.log(LogType::Error, &message).await;
                     return Err(message.into());
                 }
                 match _host {
@@ -90,7 +87,6 @@ impl Worker {
             }
             _ => {
                 let message = format!("Invalid url: {}", url);
-                let _ = self.logger.log(LogType::Error, &message).await;
                 return Err(message.into());
             }
         }
@@ -110,8 +106,6 @@ impl Worker {
         let (ws_stream, _) = match connect_async(url).await {
             Ok((ws_stream, res)) => (ws_stream, res),
             Err(e) => {
-                let message = format!("Error connecting to master: {}", e);
-                let _ = self.logger.log(LogType::Error, &message).await;
                 return Err(Box::new(e));
             }
         };
@@ -290,7 +284,14 @@ impl Runnable for Worker {
         select! {
             _ = token.cancelled() => {
             }
-            _ = self.run_forever() => {
+            res = self.run_forever() => {
+                match res{
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.logger.log_buffered(LogType::Error, &format!("Error while running: {}", e));
+                        self.set_status(Status::Error(e.to_string()));
+                    }
+                }
             }
         }
         self.join_handles().await;

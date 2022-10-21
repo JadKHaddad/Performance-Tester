@@ -318,7 +318,14 @@ impl Runnable for Master {
         select! {
             _ = token.cancelled() => {
             }
-            _ = self.run_forever() => {
+            res = self.run_forever() => {
+                match res {
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.state.logger.log_buffered(LogType::Error, &format!("Error while running: {}", e));
+                        self.state.set_status(Status::Error(e.to_string()));
+                    }
+                }
             }
         }
         self.join_handles().await;
@@ -388,10 +395,12 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
 
                 if state.mpsc_tx.send(true).await.is_err() {
                     // this is critical, if it fails, the test will not start, so lets just terminate
+                    let err_message = "Error sending message to main thread, test will not start";
                     state.logger.log_buffered(
-                        LogType::Error,
-                        "Error sending message to main thread, test will not start",
+                        LogType::Critical,
+                        err_message,
                     );
+                    state.set_status(Status::Error(err_message.to_string()));
                     // logger will be flushed on end of run method
                     state.terminate();
                     return;

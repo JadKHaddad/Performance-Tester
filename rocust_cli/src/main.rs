@@ -76,7 +76,7 @@ async fn main() {
     });
 
     let _ = master.run().await;
-
+    println!("master finished: {:?}", master.get_status());
     //println!("Master finished: {:?}", master);
     // //println!("{:?}", master);
     tokio::time::sleep(Duration::from_secs(60)).await;

@@ -15,8 +15,8 @@ pub enum LogType {
     Info,
     Debug,
     Error,
-    Trace,
     Warning,
+    Critical
 }
 
 impl fmt::Display for LogType {
@@ -25,8 +25,8 @@ impl fmt::Display for LogType {
             LogType::Info => write!(f, "INFO"),
             LogType::Debug => write!(f, "DEBUG"),
             LogType::Error => write!(f, "ERROR"),
-            LogType::Trace => write!(f, "TRACE"),
             LogType::Warning => write!(f, "WARNING"),
+            LogType::Critical => write!(f, "CRITICAL"),
         }
     }
 }
@@ -89,7 +89,11 @@ impl Logger {
             .append(true)
             .open(&self.logfile_path)
             .await?;
-        file.write(result.as_bytes()).await?;
+        if file.write(result.as_bytes()).await.is_err() {
+            let message = format!("Failed to write to log file: [{}]", self.logfile_path);
+            eprintln!("{}", message);
+            return Err(message.into());
+        }
         Ok(())
     }
 
@@ -108,8 +112,11 @@ impl Logger {
             .append(true)
             .open(&self.logfile_path)
             .await?;
-
-        file.write(format!("{}\n", msg).as_bytes()).await?;
+        if file.write(format!("{}\n", msg).as_bytes()).await.is_err() {
+            let message = format!("Failed to write to log file: [{}]", self.logfile_path);
+            eprintln!("{}", message);
+            return Err(message.into());
+        }
         Ok(())
     }
 }

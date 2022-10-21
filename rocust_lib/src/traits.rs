@@ -18,7 +18,6 @@ pub trait HasResults {
 #[async_trait]
 pub trait Runnable {
     async fn run(&mut self);
-    // TODO: async fn run(&mut self) -> Result<(), Box<dyn Error>>;
     fn stop(&self);
     fn finish(&self);
     fn get_status(&self) -> Status;
