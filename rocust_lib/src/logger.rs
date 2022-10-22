@@ -9,7 +9,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::{error::Error, fmt, sync::Arc};
-use tokio::{fs::OpenOptions, io::AsyncWriteExt};
+use tokio::{fs, fs::OpenOptions, io::AsyncWriteExt};
 
 pub enum LogType {
     Info,
@@ -38,6 +38,8 @@ pub struct Logger {
     print_to_console: bool,
 }
 
+//TODO: Create log folder if does not exist on logger creation or use logger init,
+//  cuz tokio::fs::create_dir_all is async and we need to wait for it to finish
 impl Logger {
     pub fn new(logfile_path: String, print_to_console: bool) -> Logger {
         Logger {
