@@ -317,6 +317,10 @@ impl HasResults for User {
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
     }
+
+    fn clone_results(&self) -> Results {
+        self.results.read().clone()
+    }
 }
 
 impl Serialize for User {

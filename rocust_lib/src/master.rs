@@ -1,4 +1,4 @@
-use crate::{HasResults, LogType, Logger, Runnable, Status, Test};
+use crate::{HasResults, LogType, Logger, Runnable, Status, Test, Results};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
@@ -37,7 +37,7 @@ pub enum WebSocketMessage {
     Start,
     Stop,
     Finish,
-    Update(String), //TODO: change
+    Update(Results)
 }
 
 impl WebSocketMessage {
@@ -421,8 +421,8 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                 if let Message::Text(text) = msg {
                     if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
                         match ws_message {
-                            WebSocketMessage::Update(s) => {
-                                println!("{}", s);
+                            WebSocketMessage::Update(results) => {
+                                println!("{}\n\n", results);
                             }
                             _ => {}
                         }

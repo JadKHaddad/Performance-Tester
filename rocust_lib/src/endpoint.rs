@@ -261,4 +261,9 @@ impl HasResults for EndPoint {
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
     }
+    
+    fn clone_results(&self) -> Results {
+        self.results.read().clone()
+    }
+
 }

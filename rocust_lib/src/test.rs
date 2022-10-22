@@ -440,6 +440,10 @@ impl HasResults for Test {
     fn get_results(&self) -> Arc<RwLock<Results>> {
         self.results.clone()
     }
+
+    fn clone_results(&self) -> Results {
+        self.results.read().clone()
+    }
 }
 
 impl Serialize for Test {

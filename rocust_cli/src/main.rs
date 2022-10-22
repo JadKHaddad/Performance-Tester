@@ -34,12 +34,12 @@ async fn main() {
 
     let mut master = Master::new(
         String::from("Master"),
-        2,
+        1,
         test.clone(),
         String::from("127.0.0.1:3000"),
         String::from("log/master.log"),
         true,
-        true,
+        false,
     );
     let mut worker = Worker::new(
         String::from("Worker"),
@@ -52,7 +52,7 @@ async fn main() {
         String::from("Worker 2"),
         String::from("http://127.0.0.1:3000/"),
         String::from("log/worker2.log"),
-        true,
+        false,
         false,
     );
     let master_c = master.clone();
@@ -69,11 +69,11 @@ async fn main() {
         println!("worker2 finished");
     });
 
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        let _ = worker.run().await;
-        //println!("worker1 finished: {:?}", worker);
-    });
+    // tokio::spawn(async move {
+    //     tokio::time::sleep(Duration::from_secs(5)).await;
+    //     let _ = worker.run().await;
+    //     //println!("worker1 finished: {:?}", worker);
+    // });
 
     let _ = master.run().await;
     println!("master finished: {:?}", master.get_status());

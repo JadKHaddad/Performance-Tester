@@ -13,6 +13,7 @@ pub trait HasResults {
     fn calculate_requests_per_second(&self, elapsed: &Duration);
     fn calculate_failed_requests_per_second(&self, elapsed: &Duration);
     fn get_results(&self) -> Arc<RwLock<Results>>;
+    fn clone_results(&self) -> Results;
 }
 
 #[async_trait]

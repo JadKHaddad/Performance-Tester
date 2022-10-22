@@ -1,5 +1,6 @@
 use crate::{
     master::{WebSocketMessage, WS_ENDPOINT},
+    traits::HasResults,
     LogType, Logger, Runnable, Status, Test,
 };
 use async_trait::async_trait;
@@ -266,9 +267,14 @@ impl Worker {
         let tx = self.tx.read().clone();
         loop {
             if let Some(ref tx) = tx {
-                let message = WebSocketMessage::Update(String::from("test"));
-                if let Some(json) = message.into_json() {
-                    if tx.unbounded_send(Message::text(json)).is_err() {}
+                let test = self.test.read().clone();
+                if let Some(test) = test {
+                    let results = test.clone_results(); // those are the aggregated results
+                    //TODO: we need every "results" from every endpoint
+                    let message = WebSocketMessage::Update(results);
+                    if let Some(json) = message.into_json() {
+                        if tx.unbounded_send(Message::text(json)).is_err() {}
+                    }
                 }
             }
             println!("Updating");
