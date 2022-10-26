@@ -169,6 +169,9 @@ impl State {
         -------------Worker2-------------
         Total Requests [15] | Requests per Second [1.2114545450140166] | Total Response Time [2886] | Average Response Time [222]
         ---------------------------------
+        
+            tf is this?!
+            save every worker results in hashmap, update results in background thread! pothetic!
         */
     }
 }
