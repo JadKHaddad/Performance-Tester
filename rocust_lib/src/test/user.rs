@@ -35,8 +35,8 @@ pub struct User {
     host: Arc<String>,
     global_endpoints: Arc<Vec<EndPoint>>,
     global_headers: Arc<Option<HashMap<String, String>>>,
-    global_results: Arc<RwLock<Results>>,
-    results: Arc<RwLock<Results>>,
+    global_results: Arc<RwLock<Results>>, //GLOBAL RESULTS OF A TEST (ALL USERS)
+    results: Arc<RwLock<Results>>, //USER RESULTS
     endpoints: Arc<RwLock<HashMap<String, Results>>>,
     logger: Arc<Logger>,
 }
@@ -272,7 +272,8 @@ impl Runnable for User {
 
 impl Drop for User {
     fn drop(&mut self) {
-        self.token.lock().unwrap().cancel(); //stop main thread. TODO: if user is cloned, this will stop the other thread too
+        self.token.lock().unwrap().cancel(); //stop main thread. 
+        //TODO: if user is cloned, this will stop the other thread too
     }
 }
 

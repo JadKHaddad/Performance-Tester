@@ -1,7 +1,7 @@
 use crate::{
-    master::{WebSocketMessage, WS_ENDPOINT},
+    master::{ControlWebSocketMessage, ResultsWebsocketMessage, WS_ENDPOINT},
     traits::HasResults,
-    LogType, Logger, Runnable, Status, Test,
+    LogType, Logger, Runnable, Status, Test
 };
 use async_trait::async_trait;
 use futures_channel::mpsc::UnboundedSender;
@@ -49,6 +49,17 @@ impl Worker {
             background_join_handle: Arc::new(RwLock::new(None)),
             tx: Arc::new(RwLock::new(None)),
             print_stats_to_console,
+        }
+    }
+
+    fn create_results_websocket_message(&self) -> Option<ResultsWebsocketMessage> {
+        if let Some(ref test) = *self.test.read() {
+            let agg_sent_results = test.clone_results().create_sent_results();
+            let endpoints_sent_results = test.create_endpoints_sent_results();
+            let results_websocket_message = ResultsWebsocketMessage::new(agg_sent_results, endpoints_sent_results);
+            Some(results_websocket_message)
+        } else {
+            None
         }
     }
 
@@ -121,9 +132,9 @@ impl Worker {
                 if let Ok(msg) = message {
                     match msg {
                         Message::Text(text) => {
-                            if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
+                            if let Ok(ws_message) = ControlWebSocketMessage::from_json(&text) {
                                 match ws_message {
-                                    WebSocketMessage::Create(mut test) => {
+                                    ControlWebSocketMessage::Create(mut test) => {
                                         test.set_logger(self.logger.clone());
                                         test.set_print_stats_to_console(
                                             self.print_stats_to_console,
@@ -139,17 +150,17 @@ impl Worker {
                                         *self.test.write() = Some(test);
                                     }
 
-                                    WebSocketMessage::Start => {
+                                    ControlWebSocketMessage::Start => {
                                         self.logger.log_buffered(LogType::Info, "Starting test");
                                         self.run_test();
                                     }
 
-                                    WebSocketMessage::Stop => {
+                                    ControlWebSocketMessage::Stop => {
                                         self.logger.log_buffered(LogType::Info, "Stopping test");
                                         self.stop();
                                     }
 
-                                    WebSocketMessage::Finish => {
+                                    ControlWebSocketMessage::Finish => {
                                         self.logger.log_buffered(LogType::Info, "Finishing test");
                                         self.finish();
                                     }
@@ -268,13 +279,15 @@ impl Worker {
         loop {
             if let Some(ref tx) = tx {
                 let test = self.test.read().clone();
-                if let Some(test) = test {
-                    let results = test.clone_results(); // those are the aggregated results
-                    //TODO: we need every "results" from every endpoint
-                    let message = WebSocketMessage::Update(results);
-                    if let Some(json) = message.into_json() {
-                        if tx.unbounded_send(Message::text(json)).is_err() {}
+                if let Some(_) = test {
+                    let results_websocket_message = self.create_results_websocket_message();
+                    if let Some(results_websocket_message) = results_websocket_message{
+                        let message = ControlWebSocketMessage::Update(results_websocket_message);
+                        if let Some(json) = message.into_json() {
+                            if tx.unbounded_send(Message::text(json)).is_err() {}
+                        }
                     }
+
                 }
             }
             println!("Updating");

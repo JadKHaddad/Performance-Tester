@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SentResults {
+    pub total_requests: u32,
+    pub total_failed_requests: u32,
+    pub total_connection_errors: u32,
+    pub total_response_time: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Results {
     pub total_requests: u32,
     pub total_failed_requests: u32,
@@ -28,6 +36,15 @@ impl Results {
             max_response_time: 0,
             requests_per_second: 0.0,
             failed_requests_per_second: 0.0,
+        }
+    }
+
+    pub fn create_sent_results(&self) -> SentResults {
+        SentResults {
+            total_requests: self.total_requests,
+            total_failed_requests: self.total_failed_requests,
+            total_connection_errors: self.total_connection_errors,
+            total_response_time: self.total_response_time,
         }
     }
 

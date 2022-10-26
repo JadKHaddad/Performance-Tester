@@ -1,4 +1,4 @@
-use crate::{HasResults, LogType, Logger, Runnable, Status, Test, Results};
+use crate::{HasResults, LogType, Logger, Runnable, Status, Test, SentResults};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
@@ -14,6 +14,7 @@ use poem::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     error::Error,
     fmt,
     sync::{
@@ -32,15 +33,15 @@ use tokio_util::sync::CancellationToken;
 pub const WS_ENDPOINT: &str = "ws";
 
 #[derive(Debug, Deserialize, Serialize)]
-pub enum WebSocketMessage {
+pub enum ControlWebSocketMessage {
     Create(Test),
     Start,
     Stop,
     Finish,
-    Update(Results)
+    Update(ResultsWebsocketMessage)
 }
 
-impl WebSocketMessage {
+impl ControlWebSocketMessage {
     pub fn from_json(json: &str) -> Result<Self, Box<dyn Error>> {
         let message: Self = serde_json::from_str(json)?;
         Ok(message)
@@ -54,19 +55,35 @@ impl WebSocketMessage {
     }
 }
 
-impl fmt::Display for WebSocketMessage {
+impl fmt::Display for ControlWebSocketMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WebSocketMessage::Create(test) => {
+            ControlWebSocketMessage::Create(test) => {
                 write!(f, "Create(Test: {})", test)
             }
-            WebSocketMessage::Start => write!(f, "Start"),
-            WebSocketMessage::Stop => write!(f, "Stop"),
-            WebSocketMessage::Finish => write!(f, "Finish"),
-            WebSocketMessage::Update(_) => write!(f, "Update"),
+            ControlWebSocketMessage::Start => write!(f, "Start"),
+            ControlWebSocketMessage::Stop => write!(f, "Stop"),
+            ControlWebSocketMessage::Finish => write!(f, "Finish"),
+            ControlWebSocketMessage::Update(_) => write!(f, "Update"),
         }
     }
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResultsWebsocketMessage {
+    agg_sent_results: SentResults,
+    endpoints_sent_results: HashMap<String, SentResults>
+}
+
+impl ResultsWebsocketMessage {
+    pub fn new(agg_sent_results: SentResults, endpoints_sent_results: HashMap<String, SentResults>) -> Self {
+        Self {
+            agg_sent_results,
+            endpoints_sent_results,
+        }
+    }
+}
+
 
 #[derive(Debug)]
 struct State {
@@ -340,7 +357,7 @@ impl Runnable for Master {
         self.set_status(Status::Stopped);
         self.token.lock().unwrap().cancel();
         //on stop tell the workers to stop
-        let message = WebSocketMessage::Stop;
+        let message = ControlWebSocketMessage::Stop;
         if let Some(json) = message.into_json() {
             if self.state.broadcast_tx.send(json).is_err() {
                 self.state
@@ -354,7 +371,7 @@ impl Runnable for Master {
         self.set_status(Status::Finished);
         self.token.lock().unwrap().cancel();
         //send finish message to workers
-        let message = WebSocketMessage::Finish;
+        let message = ControlWebSocketMessage::Finish;
         if let Some(json) = message.into_json() {
             if self.state.broadcast_tx.send(json).is_err() {
                 self.state
@@ -407,7 +424,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                 }
                 state.test.set_start_timestamp(Instant::now());
                 //Test will not start here, it will start in the workers
-                let message = WebSocketMessage::Start;
+                let message = ControlWebSocketMessage::Start;
                 if let Some(json) = message.into_json() {
                     if sender.send(json).is_err() {
                         state
@@ -419,10 +436,11 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
             }
             while let Some(Ok(msg)) = stream.next().await {
                 if let Message::Text(text) = msg {
-                    if let Ok(ws_message) = WebSocketMessage::from_json(&text) {
+                    if let Ok(ws_message) = ControlWebSocketMessage::from_json(&text) {
                         match ws_message {
-                            WebSocketMessage::Update(results) => {
-                                println!("{}\n\n", results);
+                            ControlWebSocketMessage::Update(results_websocket_message) => {
+                                //TODO: Combine results
+                                println!("{:?}\n\n", results_websocket_message);
                             }
                             _ => {}
                         }
@@ -441,7 +459,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
 
         tokio::spawn(async move {
             // send the test and the user count to the worker, when the worker is connected
-            let message = WebSocketMessage::Create(test);
+            let message = ControlWebSocketMessage::Create(test);
             if let Some(json) = message.into_json() {
                 if sink.send(Message::Text(json)).await.is_err() {
                     state_clone

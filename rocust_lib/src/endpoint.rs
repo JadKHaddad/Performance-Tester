@@ -33,7 +33,7 @@ pub struct EndPoint {
     pub headers: Option<HashMap<String, String>>,
     pub params: Option<Vec<(String, String)>>,
     pub body: Option<String>,
-    pub results: Arc<RwLock<Results>>,
+    pub results: Arc<RwLock<Results>>, //ENDPOINT RESULTS
 }
 
 impl Serialize for EndPoint {

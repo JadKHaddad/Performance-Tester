@@ -4,6 +4,7 @@ pub use traits::Runnable;
 
 pub mod results;
 pub use results::Results;
+pub use results::SentResults;
 
 pub mod status;
 pub use status::Status;

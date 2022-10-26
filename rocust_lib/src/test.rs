@@ -1,4 +1,4 @@
-use crate::{EndPoint, HasResults, LogType, Logger, Results, Runnable, Status};
+use crate::{EndPoint, HasResults, LogType, Logger, Results, Runnable, Status, SentResults};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use prettytable::{row, Table};
@@ -24,16 +24,16 @@ pub mod user;
 pub struct Test {
     id: String,
     status: Arc<RwLock<Status>>,
-    background_token: Arc<Mutex<CancellationToken>>, //
+    background_token: Arc<Mutex<CancellationToken>>,
     user_count: u32,
     run_time: Option<u64>,
     sleep: (u64, u64),
     host: Arc<String>,
     endpoints: Arc<Vec<EndPoint>>,
     global_headers: Arc<Option<HashMap<String, String>>>,
-    results: Arc<RwLock<Results>>,
-    start_timestamp: Arc<RwLock<Option<Instant>>>, //
-    end_timestamp: Arc<RwLock<Option<Instant>>>,   //
+    results: Arc<RwLock<Results>>, //AGGREGATED RESULTS
+    start_timestamp: Arc<RwLock<Option<Instant>>>,
+    end_timestamp: Arc<RwLock<Option<Instant>>>,
     users: Arc<RwLock<Vec<User>>>,
     logger: Arc<Logger>,
     print_stats_to_console: Arc<bool>,
@@ -275,6 +275,17 @@ impl Test {
 
     pub fn get_end_timestamp(&self) -> &Arc<RwLock<Option<Instant>>> {
         &self.end_timestamp
+    }
+
+    pub fn create_endpoints_sent_results(&self) -> HashMap<String, SentResults> {
+        let mut endpoints_sent_results = HashMap::new();
+        for endpoint in self.endpoints.iter() {
+            endpoints_sent_results.insert(
+                endpoint.get_url().clone(),
+                endpoint.get_results().read().create_sent_results()
+            );
+        }
+        endpoints_sent_results
     }
 }
 
