@@ -1,4 +1,4 @@
-use crate::{HasResults, LogType, Logger, Runnable, Status, Test, SentResults};
+use crate::{HasResults, LogType, Logger, Runnable, SentResults, Status, Test};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
@@ -38,7 +38,7 @@ pub enum ControlWebSocketMessage {
     Start,
     Stop,
     Finish,
-    Update(ResultsWebsocketMessage)
+    Update(ResultsWebsocketMessage),
 }
 
 impl ControlWebSocketMessage {
@@ -72,18 +72,21 @@ impl fmt::Display for ControlWebSocketMessage {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ResultsWebsocketMessage {
     agg_sent_results: SentResults,
-    endpoints_sent_results: HashMap<String, SentResults>
+    endpoints_sent_results: HashMap<String, SentResults>,
+    //TODO: users_sent_results: HashMap<String, SentResults>,
 }
 
 impl ResultsWebsocketMessage {
-    pub fn new(agg_sent_results: SentResults, endpoints_sent_results: HashMap<String, SentResults>) -> Self {
+    pub fn new(
+        agg_sent_results: SentResults,
+        endpoints_sent_results: HashMap<String, SentResults>,
+    ) -> Self {
         Self {
             agg_sent_results,
             endpoints_sent_results,
         }
     }
 }
-
 
 #[derive(Debug)]
 struct State {
@@ -137,6 +140,36 @@ impl State {
         self.set_remaining_users_count(remaining_users_count - user_count);
         test.set_user_count(user_count);
         user_count
+    }
+
+    fn combine_results(&self, results_websocket_message: ResultsWebsocketMessage) {
+        //combine agg results
+        let agg_results = self.test.get_results();
+        let agg_sent_results = results_websocket_message.agg_sent_results;
+        agg_results.write().combine_sent_results(&agg_sent_results);
+        //combine endpoint results
+        let endpoints = self.test.get_endpoints();
+        let endpoints_sent_results = results_websocket_message.endpoints_sent_results;
+        for endpoint in endpoints.iter() {
+            let endpoint_results = endpoint.get_results();
+            if let Some(endpoint_sent_results) = endpoints_sent_results.get(&endpoint.url) {
+                endpoint_results
+                    .write()
+                    .combine_sent_results(endpoint_sent_results);
+            }
+        }
+        //TODO: combine user results
+        //TODO: avg, min and max
+        //TODO: Wrong
+        /*
+        -------------Master-------------
+        Total Requests [119] | Requests per Second [13.015802014907404] | Total Response Time [15530] | Average Response Time [0]
+        -------------Worker1-------------
+        Total Requests [19] | Requests per Second [1.9825976827530458] | Total Response Time [1458] | Average Response Time [104]
+        -------------Worker2-------------
+        Total Requests [15] | Requests per Second [1.2114545450140166] | Total Response Time [2886] | Average Response Time [222]
+        ---------------------------------
+        */
     }
 }
 
@@ -324,6 +357,10 @@ impl Master {
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
     }
+
+    pub fn get_test(&self) -> Test {
+        self.state.test.clone()
+    }
 }
 
 #[async_trait]
@@ -439,8 +476,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                     if let Ok(ws_message) = ControlWebSocketMessage::from_json(&text) {
                         match ws_message {
                             ControlWebSocketMessage::Update(results_websocket_message) => {
-                                //TODO: Combine results
-                                println!("{:?}\n\n", results_websocket_message);
+                                state.combine_results(results_websocket_message)
                             }
                             _ => {}
                         }

@@ -290,9 +290,12 @@ impl Worker {
 
                 }
             }
-            println!("Updating");
             tokio::time::sleep(Duration::from_secs(thread_sleep_time)).await;
         }
+    }
+
+    pub fn get_test(&self) -> Option<Test> {
+        self.test.read().clone()
     }
 }
 

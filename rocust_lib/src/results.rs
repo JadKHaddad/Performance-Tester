@@ -48,6 +48,13 @@ impl Results {
         }
     }
 
+    pub fn combine_sent_results(&mut self, sent_results: &SentResults) {
+        self.total_requests += sent_results.total_requests;
+        self.total_failed_requests += sent_results.total_failed_requests;
+        self.total_connection_errors += sent_results.total_connection_errors;
+        self.total_response_time += sent_results.total_response_time;
+    }
+
     pub fn add_response_time(&mut self, response_time: u32) {
         self.total_response_time += response_time;
         self.total_requests += 1;

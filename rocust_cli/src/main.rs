@@ -1,4 +1,4 @@
-use rocust_lib::{test::user::User, EndPoint, Master, Runnable, Test, Worker};
+use rocust_lib::{test::user::User, EndPoint, Master, Runnable, Test, Worker, traits::HasResults};
 use std::{process::exit, time::Duration};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 1000)]
@@ -34,12 +34,12 @@ async fn main() {
 
     let mut master = Master::new(
         String::from("Master"),
-        1,
+        2,
         test.clone(),
         String::from("127.0.0.1:3000"),
         String::from("log/master.log"),
         true,
-        false,
+        true,
     );
     let mut worker = Worker::new(
         String::from("Worker"),
@@ -66,17 +66,23 @@ async fn main() {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let _ = worker2.run().await;
-        println!("worker2 finished");
+        println!("-------------Worker2-------------");
+        println!("{}", worker2.get_test().unwrap().get_results().read());
+        println!("---------------------------------");
     });
 
-    // tokio::spawn(async move {
-    //     tokio::time::sleep(Duration::from_secs(5)).await;
-    //     let _ = worker.run().await;
-    //     //println!("worker1 finished: {:?}", worker);
-    // });
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _ = worker.run().await;
+        println!("-------------Worker1-------------");
+        println!("{}", worker.get_test().unwrap().get_results().read());
+        println!("---------------------------------");
+    });
 
     let _ = master.run().await;
-    println!("master finished: {:?}", master.get_status());
+    println!("-------------Master-------------");
+    println!("{}", master.get_test().get_results().read());
+    println!("---------------------------------");
     //println!("Master finished: {:?}", master);
     // //println!("{:?}", master);
     tokio::time::sleep(Duration::from_secs(60)).await;
