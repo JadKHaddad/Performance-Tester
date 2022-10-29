@@ -8,8 +8,8 @@ async fn main() {
     let mut test = Test::new(
         String::from("test1"),
         21,
-        Some(10),
-        (1, 10),
+        Some(5),
+        (1, 2),
         "https://google.com".to_string(),
         vec![
             EndPoint::new_get(
@@ -38,8 +38,8 @@ async fn main() {
         test.clone(),
         String::from("127.0.0.1:3000"),
         String::from("log/master.log"),
-        true,
-        true,
+        false,
+        false,
     );
     let mut worker = Worker::new(
         String::from("Worker"),
@@ -68,6 +68,8 @@ async fn main() {
         let _ = worker2.run().await;
         println!("-------------Worker2-------------");
         println!("{}", worker2.get_test().unwrap().get_results().read());
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        worker2.get_test().unwrap().print_stats();
         println!("---------------------------------");
     });
 
@@ -76,16 +78,20 @@ async fn main() {
         let _ = worker.run().await;
         println!("-------------Worker1-------------");
         println!("{}", worker.get_test().unwrap().get_results().read());
+        worker.get_test().unwrap().print_stats();
         println!("---------------------------------");
     });
 
     let _ = master.run().await;
     println!("-------------Master-------------");
     println!("{}", master.get_test().get_results().read());
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    master.get_test().print_stats();
+    println!("{:?}", master.get_workers_results());
     println!("---------------------------------");
     //println!("Master finished: {:?}", master);
     // //println!("{:?}", master);
-    tokio::time::sleep(Duration::from_secs(60)).await;
+    //tokio::time::sleep(Duration::from_secs(60)).await;
     exit(0);
     //tokio::time::sleep(Duration::from_secs(60)).await;
 

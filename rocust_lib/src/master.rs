@@ -12,6 +12,7 @@ use poem::{
     },
     EndpointExt, IntoResponse, Route, Server,
 };
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -69,7 +70,7 @@ impl fmt::Display for ControlWebSocketMessage {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ResultsWebsocketMessage {
     agg_sent_results: SentResults,
     endpoints_sent_results: HashMap<String, SentResults>,
@@ -100,33 +101,42 @@ struct State {
     mpsc_tx: mpsc::Sender<bool>,
     master_cancel_token: CancellationToken,
     remaining_users: AtomicU32,
+    workers_results: RwLock<HashMap<String, ResultsWebsocketMessage>>,
 }
 
 impl State {
     fn get_remaining_users_count(&self) -> u32 {
         self.remaining_users.load(SeqCst)
     }
+
     fn set_remaining_users_count(&self, value: u32) {
         self.remaining_users.store(value, SeqCst);
     }
+
     fn increase_connected_workers_count(&self) {
         self.connected_workers.fetch_add(1, SeqCst);
     }
+
     fn decrease_connected_workers_count(&self) {
         self.connected_workers.fetch_sub(1, SeqCst);
     }
+
     fn get_connected_workers_count(&self) -> u32 {
         self.connected_workers.load(SeqCst)
     }
+
     pub fn set_status(&self, status: Status) {
         *self.status.write() = status;
     }
+
     fn terminate(&self) {
         self.master_cancel_token.cancel();
     }
+
     fn get_workers_count(&self) -> u32 {
         self.workers_count
     }
+
     fn set_test_workers_count(&self, test: &mut Test) -> u32 {
         let remaining_users_count = self.get_remaining_users_count();
         let mut user_count = test.get_user_count() / self.get_workers_count();
@@ -142,37 +152,57 @@ impl State {
         user_count
     }
 
-    fn combine_results(&self, results_websocket_message: ResultsWebsocketMessage) {
-        //combine agg results
-        let agg_results = self.test.get_results();
-        let agg_sent_results = results_websocket_message.agg_sent_results;
-        agg_results.write().combine_sent_results(&agg_sent_results);
-        //combine endpoint results
-        let endpoints = self.test.get_endpoints();
-        let endpoints_sent_results = results_websocket_message.endpoints_sent_results;
-        for endpoint in endpoints.iter() {
-            let endpoint_results = endpoint.get_results();
-            if let Some(endpoint_sent_results) = endpoints_sent_results.get(&endpoint.url) {
-                endpoint_results
-                    .write()
-                    .combine_sent_results(endpoint_sent_results);
+    fn create_random_worker_id(&self) -> String {
+        loop {
+            let id: String = rand::thread_rng()
+                .sample_iter(&rand::distributions::Alphanumeric)
+                .take(7)
+                .map(char::from)
+                .collect();
+            if !self.workers_results.read().contains_key(&id) {
+                return id;
             }
         }
-        //TODO: combine user results
-        //TODO: avg, min and max
-        //TODO: Wrong
-        /*
-        -------------Master-------------
-        Total Requests [119] | Requests per Second [13.015802014907404] | Total Response Time [15530] | Average Response Time [0]
-        -------------Worker1-------------
-        Total Requests [19] | Requests per Second [1.9825976827530458] | Total Response Time [1458] | Average Response Time [104]
-        -------------Worker2-------------
-        Total Requests [15] | Requests per Second [1.2114545450140166] | Total Response Time [2886] | Average Response Time [222]
-        ---------------------------------
-        
-            tf is this?!
-            save every worker results in hashmap, update results in background thread! pothetic!
-        */
+    }
+
+    fn update_workers_resluts(&self, worker_id: &str, results: ResultsWebsocketMessage) {
+        self.workers_results
+            .write()
+            .insert(worker_id.to_string(), results);
+    }
+
+    fn combine_results(&self) {
+        //reset results
+        self.test.get_results().write().reset();
+        for endpint in self.test.get_endpoints().iter() {
+            endpint.get_results().write().reset();
+        }
+        for (_, results_websocket_message) in self.workers_results.read().iter() {
+            //combine agg results
+            let agg_results = self.test.get_results();
+            let agg_sent_results = &results_websocket_message.agg_sent_results;
+            agg_results.write().combine_sent_results(&agg_sent_results);
+            //combine endpoint results
+            let endpoints = self.test.get_endpoints();
+            let endpoints_sent_results = &results_websocket_message.endpoints_sent_results;
+            for endpoint in endpoints.iter() {
+                let endpoint_results = endpoint.get_results();
+                if let Some(endpoint_sent_results) = endpoints_sent_results.get(&endpoint.url) {
+                    endpoint_results
+                        .write()
+                        .combine_sent_results(endpoint_sent_results);
+                }
+            }
+            //TODO: combine user results
+        }
+        //calculate requests per second
+        if let Some(elapsed) = Test::calculate_elapsed_time(
+            *self.test.get_start_timestamp().read(),
+            *self.test.get_end_timestamp().read(),
+        ) {
+            self.test.calculate_requests_per_second(&elapsed);
+            self.test.calculate_failed_requests_per_second(&elapsed);
+        }
     }
 }
 
@@ -218,6 +248,7 @@ impl Master {
             mpsc_tx,
             master_cancel_token: cancelation_token.clone(),
             remaining_users: AtomicU32::new(user_count),
+            workers_results: RwLock::new(HashMap::new()),
         });
         if log_message {
             state.logger.log_buffered(
@@ -341,16 +372,9 @@ impl Master {
 
     async fn update_in_background(&self, thread_sleep_time: u64) {
         loop {
-            //calculate requests per second
-            if let Some(elapsed) = Test::calculate_elapsed_time(
-                *self.state.test.get_start_timestamp().read(),
-                *self.state.test.get_end_timestamp().read(),
-            ) {
-                self.state.test.calculate_requests_per_second(&elapsed);
-                self.state
-                    .test
-                    .calculate_failed_requests_per_second(&elapsed);
-            }
+            // combime workers results
+            self.combine_results();
+
             //print stats
             if *self.print_stats_to_console {
                 self.state.test.print_stats();
@@ -363,6 +387,14 @@ impl Master {
 
     pub fn get_test(&self) -> Test {
         self.state.test.clone()
+    }
+
+    pub fn combine_results(&self) {
+        self.state.combine_results();
+    }
+
+    pub fn get_workers_results(&self) -> HashMap<String, ResultsWebsocketMessage> {
+        self.state.workers_results.read().clone()
     }
 }
 
@@ -386,6 +418,7 @@ impl Runnable for Master {
             }
         }
         self.join_handles().await;
+        self.combine_results();
         self.state
             .logger
             .log_buffered(LogType::Info, "Terminating... Bye!");
@@ -443,6 +476,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
         let mut test = state.test.clone();
         state.increase_connected_workers_count();
         let user_count = state.set_test_workers_count(&mut test);
+        let worker_id = state.create_random_worker_id();
         tokio::spawn(async move {
             state.logger.log_buffered(LogType::Info, "Worker connected");
             if state.get_connected_workers_count() == state.workers_count {
@@ -479,7 +513,7 @@ fn ws(ws: WebSocket, state: Data<&Arc<State>>) -> impl IntoResponse {
                     if let Ok(ws_message) = ControlWebSocketMessage::from_json(&text) {
                         match ws_message {
                             ControlWebSocketMessage::Update(results_websocket_message) => {
-                                state.combine_results(results_websocket_message)
+                                state.update_workers_resluts(&worker_id, results_websocket_message);
                             }
                             _ => {}
                         }

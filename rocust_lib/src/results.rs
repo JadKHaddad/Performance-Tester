@@ -7,6 +7,10 @@ pub struct SentResults {
     pub total_failed_requests: u32,
     pub total_connection_errors: u32,
     pub total_response_time: u32,
+    //pub average_response_time: u32,
+    pub min_response_time: u32,
+    pub median_response_time: u32,
+    pub max_response_time: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -39,12 +43,20 @@ impl Results {
         }
     }
 
+    pub fn reset(&mut self) {
+        *self = Results::new();
+    }
+
     pub fn create_sent_results(&self) -> SentResults {
         SentResults {
             total_requests: self.total_requests,
             total_failed_requests: self.total_failed_requests,
             total_connection_errors: self.total_connection_errors,
             total_response_time: self.total_response_time,
+            //average_response_time: self.average_response_time,
+            min_response_time: self.min_response_time,
+            median_response_time: self.median_response_time,
+            max_response_time: self.max_response_time,
         }
     }
 
@@ -53,6 +65,17 @@ impl Results {
         self.total_failed_requests += sent_results.total_failed_requests;
         self.total_connection_errors += sent_results.total_connection_errors;
         self.total_response_time += sent_results.total_response_time;
+
+        if self.total_requests > 0 {
+            self.average_response_time = self.total_response_time / self.total_requests;
+        }
+        if self.min_response_time == 0 || sent_results.min_response_time < self.min_response_time {
+            self.min_response_time = sent_results.min_response_time;
+        }
+        if sent_results.max_response_time > self.max_response_time {
+            self.max_response_time = sent_results.max_response_time;
+        }
+        //self.median_response_time = 
     }
 
     pub fn add_response_time(&mut self, response_time: u32) {
